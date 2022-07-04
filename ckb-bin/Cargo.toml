@@ -46,6 +46,8 @@ is-terminal = "0.4.7"
 fdlimit = "0.2.1"
 ckb-stop-handler = { path = "../util/stop-handler", version = "= 0.114.0-pre" }
 tokio = { version = "1", features = ["sync"] }
+pyroscope = { version = "0.5.7", optional = true }
+pyroscope_pprofrs = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_os="windows"))'.dependencies]
 daemonize = { version = "0.5.0" }
@@ -59,3 +61,4 @@ with_sentry = ["sentry", "ckb-launcher/with_sentry", "ckb-network/with_sentry", 
 with_dns_seeding = ["ckb-network/with_dns_seeding"]
 portable = ["ckb-launcher/portable"]
 march-native = ["ckb-launcher/march-native"]
+with_pyroscope = ["pyroscope", "pyroscope_pprofrs"]

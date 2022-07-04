@@ -4,6 +4,7 @@
 mod helper;
 mod setup_guard;
 mod subcommand;
+
 use ckb_app_config::{cli, ExitCode, Setup};
 use ckb_async_runtime::new_global_runtime;
 use ckb_build_info::Version;
@@ -17,8 +18,11 @@ use setup_guard::SetupGuard;
 use colored::Colorize;
 #[cfg(not(target_os = "windows"))]
 use daemonize::Daemonize;
+#[cfg(feature = "with_pyroscope")]
+use helper::PyroscopeGuard;
 #[cfg(not(target_os = "windows"))]
 use subcommand::check_process;
+
 #[cfg(feature = "with_sentry")]
 pub(crate) const LOG_TARGET_SENTRY: &str = "sentry";
 
@@ -49,7 +53,7 @@ pub fn run_app(version: Version) -> Result<(), ExitCode> {
                     match cli {
                         cli::CMD_GEN_SECRET => return Setup::gen(matches),
                         cli::CMD_FROM_SECRET => {
-                            return subcommand::peer_id(Setup::peer_id(matches)?)
+                            return subcommand::peer_id(Setup::peer_id(matches)?);
                         }
                         _ => {}
                     }
@@ -127,6 +131,13 @@ fn run_app_inner(
 
     raise_fd_limit();
 
+    #[cfg(feature = "with_pyroscope")]
+    let pyroscope_guard = {
+        let mut guard = PyroscopeGuard::new();
+        guard.start()?;
+        guard
+    };
+
     let ret = match cmd {
         cli::CMD_RUN => subcommand::run(setup.run(matches)?, version, handle.clone()),
         cli::CMD_MINER => subcommand::miner(setup.miner(matches)?, handle.clone()),
@@ -150,6 +161,9 @@ fn run_app_inner(
             info!("All tokio tasks and threads have exited. CKB shutdown");
         });
     }
+
+    #[cfg(feature = "with_pyroscope")]
+    pyroscope_guard.shutdown()?;
 
     ret
 }
