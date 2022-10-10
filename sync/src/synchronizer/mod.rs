@@ -30,6 +30,7 @@ use ckb_network::{
     async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerIndex,
     ServiceControl, SupportProtocols,
 };
+use ckb_types::core::BlockView;
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
@@ -61,6 +62,29 @@ enum CanStart {
 
 enum FetchCMD {
     Fetch((Vec<PeerIndex>, IBDState)),
+}
+
+struct BlockAcceptCMD {
+    recv: channel::Receiver<BlockView>,
+    synchronizer: Synchronizer,
+}
+
+impl BlockAcceptCMD {
+    fn run(&mut self) {
+        loop {
+            let block = self.recv.recv();
+            if let Ok(block) = block {
+                if let Err(err) = self.synchronizer.process_new_block(block.clone()) {
+                    if !crate::utils::is_internal_db_error(&err) {
+                        error!("BlockAcceptCMD process_new_block error: {}", err);
+                    }
+                }
+            } else {
+                info!("BlockAcceptCMD recv block error");
+                return;
+            }
+        }
+    }
 }
 
 struct BlockFetchCMD {
@@ -208,6 +232,7 @@ pub struct Synchronizer {
     /// Sync shared state
     pub shared: Arc<SyncShared>,
     fetch_channel: Option<channel::Sender<FetchCMD>>,
+    accept_block_channel: Option<channel::Sender<BlockView>>,
 }
 
 impl Synchronizer {
@@ -219,6 +244,7 @@ impl Synchronizer {
             chain,
             shared,
             fetch_channel: None,
+            accept_block_channel: None,
         }
     }
 
@@ -228,7 +254,7 @@ impl Synchronizer {
     }
 
     fn try_process<'r>(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,
@@ -245,7 +271,36 @@ impl Synchronizer {
             }
             packed::SyncMessageUnionReader::SendBlock(reader) => {
                 if reader.check_data() {
-                    BlockProcess::new(reader, self, peer).execute()
+                    let block = reader.block().to_entity().into_view();
+
+                    match self.accept_block_channel {
+                        Some(ref sender) => {
+                            if self.shared().state().new_block_received(&block) {
+                                if let Err(err) = sender.send(block) {
+                                    debug!("accept_block_channel send error: {:?}", err);
+                                }
+                            }
+                        }
+                        None => {
+                            let (sender, recv) = channel::bounded(10_000);
+                            sender.send(block).unwrap();
+                            self.accept_block_channel = Some(sender);
+                            let thread = ::std::thread::Builder::new();
+                            let sync = self.clone();
+                            thread
+                                .name("AcceptBlock".to_string())
+                                .spawn(move || {
+                                    BlockAcceptCMD {
+                                        recv,
+                                        synchronizer: sync,
+                                    }
+                                    .run();
+                                })
+                                .expect("accept block thread can't start");
+                        }
+                    }
+                    Status::ok()
+                    // BlockProcess::new(reader, self, peer).execute()
                 } else {
                     StatusCode::ProtocolMessageIsMalformed.with_context("SendBlock is invalid")
                 }
@@ -256,7 +311,7 @@ impl Synchronizer {
     }
 
     fn process<'r>(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,

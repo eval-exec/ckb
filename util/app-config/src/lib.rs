@@ -31,7 +31,7 @@ use clap::{ArgMatches, ErrorKind};
 use std::{path::PathBuf, str::FromStr};
 
 // 500_000 total difficulty
-const MIN_CHAIN_WORK_500K: U256 = u256!("0x3314412053c82802a7");
+const MIN_CHAIN_WORK_500K: U256 = u256!("0x1");
 
 /// A struct including all the information to start the ckb process.
 pub struct Setup {
