@@ -23,13 +23,16 @@ use ckb_constant::sync::{
     BAD_MESSAGE_BAN_TIME, CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME,
     INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
 };
+use ckb_db::RocksDB;
 use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
 use ckb_metrics::metrics;
 use ckb_network::{
-    async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerIndex,
-    ServiceControl, SupportProtocols,
+    async_trait, bytes::Bytes, CKBProtocolContext, CKBProtocolHandler, PeerIndex, ServiceControl,
+    SupportProtocols,
 };
+use ckb_store::{ChainDB, ChainStore};
+use ckb_types::packed::HeaderVec;
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
@@ -39,7 +42,8 @@ use faketime::unix_time_as_millis;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
-    time::{Duration, Instant},
+    thread,
+    time::Duration,
 };
 
 pub const SEND_GET_HEADERS_TOKEN: u64 = 0;
@@ -634,22 +638,60 @@ impl Synchronizer {
 #[async_trait]
 impl CKBProtocolHandler for Synchronizer {
     async fn init(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>) {
-        // NOTE: 100ms is what bitcoin use.
-        nc.set_notify(SYNC_NOTIFY_INTERVAL, SEND_GET_HEADERS_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(SYNC_NOTIFY_INTERVAL, TIMEOUT_EVICTION_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(IBD_BLOCK_FETCH_INTERVAL, IBD_BLOCK_FETCH_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(NOT_IBD_BLOCK_FETCH_INTERVAL, NOT_IBD_BLOCK_FETCH_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(Duration::from_secs(2), NO_PEER_CHECK_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
+        {
+            let (block_sender, block_recv) = ckb_channel::bounded(10000);
+            let (block_header_sender, block_header_recv) = ckb_channel::bounded(20000);
+
+            let mut join_handles = Vec::new();
+            // send block number to channel in a thread
+            join_handles.push(thread::spawn(move || {
+                let rocksdb_path =
+                    "/home/exec/Projects/github.com/nervosnetwork/chain/mainnet-chain/data/db";
+                let db = RocksDB::open_in(rocksdb_path, ckb_db_schema::COLUMNS);
+                let store = ChainDB::new(db, Default::default());
+                let mut block_headers = Vec::new();
+                for number in 1..=8_000_000 {
+                    let block_number: BlockNumber = number;
+                    let block_hash = store.get_block_hash(block_number).unwrap();
+                    let block = store.get_block(&block_hash).unwrap();
+                    let block_header = store.get_block_header(&block_hash).unwrap();
+                    block_headers.push(block_header.data());
+                    block_sender.send(block.data()).unwrap();
+                    if block_headers.len() == 2000 {
+                        block_header_sender.send(block_headers.clone()).unwrap();
+                    }
+                }
+            }));
+
+            // start process block_headers;
+            info!("start process block_headers");
+            loop {
+                if let Ok(block_headers) = block_header_recv.recv() {
+                    let peer_id = PeerIndex::new(9999);
+                    let header_vec = HeaderVec::new_builder().extend(block_headers).build();
+                    let send_headers = packed::SendHeaders::new_builder()
+                        .headers(header_vec)
+                        .build();
+                    HeadersProcess::new(send_headers.as_reader(), &self, peer_id, nc.as_ref())
+                        .execute();
+                } else {
+                    break;
+                }
+            }
+            info!("end process block_headers");
+            info!("start process blocks");
+            // start process block
+            loop {
+                if let Ok(block) = block_recv.recv() {
+                    let peer_id = PeerIndex::new(9999);
+                    let send_block = packed::SendBlock::new_builder().block(block).build();
+                    BlockProcess::new(send_block.as_reader(), &self, peer_id).execute();
+                } else {
+                    break;
+                }
+            }
+            info!("end process blocks");
+        };
     }
 
     async fn received(
@@ -658,80 +700,6 @@ impl CKBProtocolHandler for Synchronizer {
         peer_index: PeerIndex,
         data: Bytes,
     ) {
-        let msg = match packed::SyncMessageReader::from_compatible_slice(&data) {
-            Ok(msg) => {
-                let item = msg.to_enum();
-                if let packed::SyncMessageUnionReader::SendBlock(ref reader) = item {
-                    if reader.count_extra_fields() > 1 {
-                        info!(
-                            "Peer {} sends us a malformed message: \
-                             too many fields in SendBlock",
-                            peer_index
-                        );
-                        nc.ban_peer(
-                            peer_index,
-                            BAD_MESSAGE_BAN_TIME,
-                            String::from(
-                                "send us a malformed message: \
-                                 too many fields in SendBlock",
-                            ),
-                        );
-                        return;
-                    } else {
-                        item
-                    }
-                } else {
-                    match packed::SyncMessageReader::from_slice(&data) {
-                        Ok(msg) => msg.to_enum(),
-                        _ => {
-                            info!(
-                                "Peer {} sends us a malformed message: \
-                                 too many fields",
-                                peer_index
-                            );
-                            nc.ban_peer(
-                                peer_index,
-                                BAD_MESSAGE_BAN_TIME,
-                                String::from(
-                                    "send us a malformed message: \
-                                     too many fields",
-                                ),
-                            );
-                            return;
-                        }
-                    }
-                }
-            }
-            _ => {
-                info!("Peer {} sends us a malformed message", peer_index);
-                nc.ban_peer(
-                    peer_index,
-                    BAD_MESSAGE_BAN_TIME,
-                    String::from("send us a malformed message"),
-                );
-                return;
-            }
-        };
-
-        debug!("received msg {} from {}", msg.item_name(), peer_index);
-        #[cfg(feature = "with_sentry")]
-        {
-            let sentry_hub = sentry::Hub::current();
-            let _scope_guard = sentry_hub.push_scope();
-            sentry_hub.configure_scope(|scope| {
-                scope.set_tag("p2p.protocol", "synchronizer");
-                scope.set_tag("p2p.message", msg.item_name());
-            });
-        }
-
-        let start_time = Instant::now();
-        tokio::task::block_in_place(|| self.process(nc.as_ref(), peer_index, msg));
-        debug!(
-            "process message={}, peer={}, cost={:?}",
-            msg.item_name(),
-            peer_index,
-            Instant::now().saturating_duration_since(start_time),
-        );
     }
 
     async fn connected(
@@ -740,8 +708,6 @@ impl CKBProtocolHandler for Synchronizer {
         peer_index: PeerIndex,
         _version: &str,
     ) {
-        info!("SyncProtocol.connected peer={}", peer_index);
-        self.on_connected(nc.as_ref(), peer_index);
     }
 
     async fn disconnected(
@@ -749,50 +715,7 @@ impl CKBProtocolHandler for Synchronizer {
         _nc: Arc<dyn CKBProtocolContext + Sync>,
         peer_index: PeerIndex,
     ) {
-        let sync_state = self.shared().state();
-        sync_state.disconnected(peer_index);
     }
 
-    async fn notify(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>, token: u64) {
-        if !self.peers().state.is_empty() {
-            let start_time = Instant::now();
-            trace!("start notify token={}", token);
-            match token {
-                SEND_GET_HEADERS_TOKEN => {
-                    self.start_sync_headers(nc.as_ref());
-                }
-                IBD_BLOCK_FETCH_TOKEN => {
-                    if self.shared.active_chain().is_initial_block_download() {
-                        self.find_blocks_to_fetch(nc.as_ref(), IBDState::In);
-                    } else {
-                        {
-                            self.shared.state().write_inflight_blocks().adjustment = false;
-                        }
-                        self.shared.state().peers().clear_unknown_list();
-                        if nc.remove_notify(IBD_BLOCK_FETCH_TOKEN).await.is_err() {
-                            trace!("remove ibd block fetch fail");
-                        }
-                    }
-                }
-                NOT_IBD_BLOCK_FETCH_TOKEN => {
-                    if !self.shared.active_chain().is_initial_block_download() {
-                        self.find_blocks_to_fetch(nc.as_ref(), IBDState::Out);
-                    }
-                }
-                TIMEOUT_EVICTION_TOKEN => {
-                    self.eviction(nc.as_ref());
-                }
-                // Here is just for NO_PEER_CHECK_TOKEN token, only handle it when there is no peer.
-                _ => {}
-            }
-
-            trace!(
-                "finished notify token={} cost={:?}",
-                token,
-                Instant::now().saturating_duration_since(start_time)
-            );
-        } else if token == NO_PEER_CHECK_TOKEN {
-            debug!("no peers connected");
-        }
-    }
+    async fn notify(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>, token: u64) {}
 }

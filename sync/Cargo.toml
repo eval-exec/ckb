@@ -11,6 +11,8 @@ repository = "https://github.com/nervosnetwork/ckb"
 [dependencies]
 ckb-chain = { path = "../chain", version = "= 0.105.0-pre" }
 ckb-shared = { path = "../shared", version = "= 0.105.0-pre" }
+ckb-db = {path = "../db", version = "= 0.105.0-pre"}
+ckb-db-schema = {path = "../db-schema", version = "= 0.105.0-pre"}
 ckb-store = { path = "../store", version = "= 0.105.0-pre" }
 ckb-app-config = {path = "../util/app-config", version = "= 0.105.0-pre"}
 ckb-types = {path = "../util/types", version = "= 0.105.0-pre"}
