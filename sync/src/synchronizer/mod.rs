@@ -659,6 +659,7 @@ impl CKBProtocolHandler for Synchronizer {
                     block_sender.send(block.data()).unwrap();
                     if block_headers.len() == 2000 {
                         block_header_sender.send(block_headers.clone()).unwrap();
+                        block_headers.clear();
                     }
                 }
             }));
