@@ -16,6 +16,7 @@ use crate::block_status::BlockStatus;
 use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
 use crate::utils::send_message_to;
 use crate::{Status, StatusCode};
+use rayon::prelude::*;
 
 use ckb_chain::chain::ChainController;
 use ckb_channel as channel;
@@ -23,6 +24,9 @@ use ckb_constant::sync::{
     BAD_MESSAGE_BAN_TIME, CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME,
     INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
 };
+use ckb_db::internal::ffi::rocksdb_backup_engine_info_t;
+use ckb_db::{Direction, IteratorMode, RocksDB};
+use ckb_db_schema::{COLUMNS, COLUMN_INDEX};
 use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
 use ckb_metrics::metrics;
@@ -30,12 +34,17 @@ use ckb_network::{
     async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerIndex,
     ServiceControl, SupportProtocols,
 };
+use ckb_store::{ChainDB, ChainStore};
+use ckb_types::packed::{Header, HeaderVec, SendBlock};
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
     prelude::*,
 };
+use dashmap::DashMap;
 use faketime::unix_time_as_millis;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -634,22 +643,134 @@ impl Synchronizer {
 #[async_trait]
 impl CKBProtocolHandler for Synchronizer {
     async fn init(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>) {
-        // NOTE: 100ms is what bitcoin use.
-        nc.set_notify(SYNC_NOTIFY_INTERVAL, SEND_GET_HEADERS_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(SYNC_NOTIFY_INTERVAL, TIMEOUT_EVICTION_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(IBD_BLOCK_FETCH_INTERVAL, IBD_BLOCK_FETCH_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(NOT_IBD_BLOCK_FETCH_INTERVAL, NOT_IBD_BLOCK_FETCH_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
-        nc.set_notify(Duration::from_secs(2), NO_PEER_CHECK_TOKEN)
-            .await
-            .expect("set_notify at init is ok");
+        {
+            let db = RocksDB::open_in(
+                "/home/exec/Projects/github.com/nervosnetwork/chain/sync-base/data/db",
+                COLUMNS,
+            );
+            let store = ChainDB::new(db, Default::default());
+
+            let header_vec_count = 4000_u64;
+            let all_height = header_vec_count * 2000;
+
+            let mut headers = Vec::with_capacity(header_vec_count as usize);
+            let mut number_to_hash: DashMap<BlockNumber, Byte32> = DashMap::new();
+
+            info!("debug, get number to hash");
+            {
+                store
+                    .get_iter(COLUMN_INDEX, IteratorMode::Start)
+                    .par_bridge()
+                    .for_each(|(k, v)| {
+                        if k.len() == 32 {
+                            let hash =
+                                packed::Byte32Reader::from_slice_should_be_ok(&k).to_entity();
+                            let number: BlockNumber =
+                                packed::Uint64Reader::from_slice_should_be_ok(&v).unpack();
+                            number_to_hash.insert(number, hash);
+                        }
+                    });
+            }
+
+            info!("debug, prepare headers and body queue");
+            let headers_map = DashMap::new();
+            {
+                (1..=all_height)
+                    .into_iter()
+                    .par_bridge()
+                    .for_each(|height| {
+                        let block_number: BlockNumber = height;
+                        let block_hash = number_to_hash.get(&block_number).unwrap();
+                        let header = store.get_packed_block_header(&block_hash).unwrap();
+                        headers_map.insert(block_number, header);
+                        if headers_map.len() % 10000 == 0 {
+                            info!("debug, headers_map.len() = {}", headers_map.len());
+                        }
+                    });
+            }
+            info!("fill headers done");
+
+            let mut header_vec: Vec<Header> = Vec::new();
+            for height in 1..=all_height {
+                let block_number: BlockNumber = height;
+                let header = headers_map.get(&height).unwrap();
+                header_vec.push(header.value().clone());
+
+                if height % 2000 == 0 {
+                    headers.push(
+                        HeaderVec::new_builder()
+                            .extend(header_vec.clone().into_iter())
+                            .build(),
+                    );
+                    header_vec.clear();
+                    info!("blocks-length: {}", height);
+                }
+            }
+            info!("debug, re org headers_vec done");
+
+            info!("debug, insert headers...");
+
+            for (i, header_chunk) in headers.into_iter().enumerate() {
+                let send_headers = packed::SendHeaders::new_builder()
+                    .headers(header_chunk)
+                    .build();
+                if !HeadersProcess::new(
+                    send_headers.as_reader(),
+                    self,
+                    PeerIndex::new(1),
+                    nc.as_ref(),
+                )
+                .execute()
+                .is_ok()
+                {
+                    info!("debug, insert header not ok");
+                }
+                info!("debug, insert header chunk: {}/{}", i, header_vec_count);
+            }
+            info!("debug, headers insert complete");
+            drop(headers_map);
+
+            let blocks_map = DashMap::new();
+            {
+                (1..=all_height)
+                    .into_iter()
+                    .par_bridge()
+                    .for_each(|height| {
+                        let block_number: BlockNumber = height;
+                        let block_hash = number_to_hash.get(&block_number).unwrap();
+                        let block = store.get_packed_block(&block_hash).unwrap();
+                        blocks_map.insert(block_number, block);
+                        if blocks_map.len() % 10000 == 0 {
+                            info!("debug, blocks_map.len() = {}", blocks_map.len());
+                        }
+                    });
+            }
+
+            info!("fill blocks done");
+
+            info!("debug, insert bodies...");
+            let now = std::time::Instant::now();
+            for height in 1..=all_height {
+                let block = blocks_map.get(&height).unwrap();
+                if !BlockProcess::new(
+                    SendBlock::new_builder()
+                        .block(block.value().clone())
+                        .build()
+                        .as_reader(),
+                    self,
+                    PeerIndex::new(1),
+                )
+                .execute()
+                .is_ok()
+                {
+                    info!("debug, insert block not ok")
+                }
+            }
+            info!(
+                "debug, bodies insert complete, timecost: {}s",
+                Instant::now().duration_since(now).as_secs()
+            )
+        }
     }
 
     async fn received(
@@ -658,80 +779,6 @@ impl CKBProtocolHandler for Synchronizer {
         peer_index: PeerIndex,
         data: Bytes,
     ) {
-        let msg = match packed::SyncMessageReader::from_compatible_slice(&data) {
-            Ok(msg) => {
-                let item = msg.to_enum();
-                if let packed::SyncMessageUnionReader::SendBlock(ref reader) = item {
-                    if reader.count_extra_fields() > 1 {
-                        info!(
-                            "Peer {} sends us a malformed message: \
-                             too many fields in SendBlock",
-                            peer_index
-                        );
-                        nc.ban_peer(
-                            peer_index,
-                            BAD_MESSAGE_BAN_TIME,
-                            String::from(
-                                "send us a malformed message: \
-                                 too many fields in SendBlock",
-                            ),
-                        );
-                        return;
-                    } else {
-                        item
-                    }
-                } else {
-                    match packed::SyncMessageReader::from_slice(&data) {
-                        Ok(msg) => msg.to_enum(),
-                        _ => {
-                            info!(
-                                "Peer {} sends us a malformed message: \
-                                 too many fields",
-                                peer_index
-                            );
-                            nc.ban_peer(
-                                peer_index,
-                                BAD_MESSAGE_BAN_TIME,
-                                String::from(
-                                    "send us a malformed message: \
-                                     too many fields",
-                                ),
-                            );
-                            return;
-                        }
-                    }
-                }
-            }
-            _ => {
-                info!("Peer {} sends us a malformed message", peer_index);
-                nc.ban_peer(
-                    peer_index,
-                    BAD_MESSAGE_BAN_TIME,
-                    String::from("send us a malformed message"),
-                );
-                return;
-            }
-        };
-
-        debug!("received msg {} from {}", msg.item_name(), peer_index);
-        #[cfg(feature = "with_sentry")]
-        {
-            let sentry_hub = sentry::Hub::current();
-            let _scope_guard = sentry_hub.push_scope();
-            sentry_hub.configure_scope(|scope| {
-                scope.set_tag("p2p.protocol", "synchronizer");
-                scope.set_tag("p2p.message", msg.item_name());
-            });
-        }
-
-        let start_time = Instant::now();
-        tokio::task::block_in_place(|| self.process(nc.as_ref(), peer_index, msg));
-        debug!(
-            "process message={}, peer={}, cost={:?}",
-            msg.item_name(),
-            peer_index,
-            Instant::now().saturating_duration_since(start_time),
-        );
     }
 
     async fn connected(
@@ -740,8 +787,6 @@ impl CKBProtocolHandler for Synchronizer {
         peer_index: PeerIndex,
         _version: &str,
     ) {
-        info!("SyncProtocol.connected peer={}", peer_index);
-        self.on_connected(nc.as_ref(), peer_index);
     }
 
     async fn disconnected(
@@ -749,50 +794,7 @@ impl CKBProtocolHandler for Synchronizer {
         _nc: Arc<dyn CKBProtocolContext + Sync>,
         peer_index: PeerIndex,
     ) {
-        let sync_state = self.shared().state();
-        sync_state.disconnected(peer_index);
     }
 
-    async fn notify(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>, token: u64) {
-        if !self.peers().state.is_empty() {
-            let start_time = Instant::now();
-            trace!("start notify token={}", token);
-            match token {
-                SEND_GET_HEADERS_TOKEN => {
-                    self.start_sync_headers(nc.as_ref());
-                }
-                IBD_BLOCK_FETCH_TOKEN => {
-                    if self.shared.active_chain().is_initial_block_download() {
-                        self.find_blocks_to_fetch(nc.as_ref(), IBDState::In);
-                    } else {
-                        {
-                            self.shared.state().write_inflight_blocks().adjustment = false;
-                        }
-                        self.shared.state().peers().clear_unknown_list();
-                        if nc.remove_notify(IBD_BLOCK_FETCH_TOKEN).await.is_err() {
-                            trace!("remove ibd block fetch fail");
-                        }
-                    }
-                }
-                NOT_IBD_BLOCK_FETCH_TOKEN => {
-                    if !self.shared.active_chain().is_initial_block_download() {
-                        self.find_blocks_to_fetch(nc.as_ref(), IBDState::Out);
-                    }
-                }
-                TIMEOUT_EVICTION_TOKEN => {
-                    self.eviction(nc.as_ref());
-                }
-                // Here is just for NO_PEER_CHECK_TOKEN token, only handle it when there is no peer.
-                _ => {}
-            }
-
-            trace!(
-                "finished notify token={} cost={:?}",
-                token,
-                Instant::now().saturating_duration_since(start_time)
-            );
-        } else if token == NO_PEER_CHECK_TOKEN {
-            debug!("no peers connected");
-        }
-    }
+    async fn notify(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>, token: u64) {}
 }
