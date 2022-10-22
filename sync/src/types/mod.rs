@@ -1770,15 +1770,11 @@ impl SyncState {
 
     // Return true when the block is that we have requested and received first time.
     pub fn new_block_received(&self, block: &core::BlockView) -> bool {
-        if self
-            .write_inflight_blocks()
-            .remove_by_block((block.number(), block.hash()).into())
-        {
-            self.insert_block_status(block.hash(), BlockStatus::BLOCK_RECEIVED);
-            true
-        } else {
-            false
-        }
+        // if self
+        //     .write_inflight_blocks()
+        //     .remove_by_block((block.number(), block.hash()).into())
+        self.insert_block_status(block.hash(), BlockStatus::BLOCK_RECEIVED);
+        true
     }
 
     pub fn insert_inflight_proposals(

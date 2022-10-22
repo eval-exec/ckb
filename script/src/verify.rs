@@ -13,7 +13,7 @@ use crate::{
         TransactionSnapshot, TransactionState, VerifyResult,
     },
 };
-use std::borrow::BorrowMut;
+use std::cell::RefCell;
 
 use ckb_chain_spec::consensus::TYPE_ID_CODE_HASH;
 use ckb_error::Error;
@@ -36,7 +36,6 @@ use ckb_vm::{
     DefaultMachineBuilder, Error as VMInternalError, SupportMachine, Syscalls,
 };
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -410,21 +409,17 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
     /// It returns the total consumed cycles on success, Otherwise it returns the verification error.
     pub fn verify(&self, max_cycles: Cycle) -> Result<Cycle, Error> {
         let all_used_cycles = AtomicU64::new(0);
-        let result = self
-            .groups()
-            .into_iter()
-            .par_bridge()
-            .try_for_each(|(hash, group)| {
-                self.verify_script_group(group, max_cycles)
-                    .map(|used_cycle| {
-                        all_used_cycles.fetch_add(used_cycle.into(), Ordering::Acquire);
-                    })
-                    .map_err(|err| {
-                        #[cfg(feature = "logging")]
-                        logging::on_script_error(hash, &self.hash(), &err);
-                        err.source(group)
-                    })
-            });
+        let result = self.groups().par_bridge().try_for_each(|(hash, group)| {
+            self.verify_script_group(group, max_cycles)
+                .map(|used_cycle| {
+                    all_used_cycles.fetch_add(used_cycle.into(), Ordering::SeqCst);
+                })
+                .map_err(|err| {
+                    #[cfg(feature = "logging")]
+                    logging::on_script_error(hash, &self.hash(), &err);
+                    err.source(group)
+                })
+        });
         if let Err(err) = result {
             return Err(err.into());
         }

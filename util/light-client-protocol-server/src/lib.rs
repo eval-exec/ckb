@@ -44,11 +44,11 @@ impl CKBProtocolHandler for LightClientProtocol {
         peer: PeerIndex,
         version: &str,
     ) {
-        info!("LightClient({}).connected peer={}", version, peer);
+        debug!("LightClient({}).connected peer={}", version, peer);
     }
 
     async fn disconnected(&mut self, _nc: Arc<dyn CKBProtocolContext + Sync>, peer: PeerIndex) {
-        info!("LightClient.disconnected peer={}", peer);
+        debug!("LightClient.disconnected peer={}", peer);
     }
 
     async fn received(

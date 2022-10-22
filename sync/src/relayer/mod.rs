@@ -831,7 +831,7 @@ impl CKBProtocolHandler for Relayer {
         version: &str,
     ) {
         self.shared().state().peers().relay_connected(peer_index);
-        info_target!(
+        debug_target!(
             crate::LOG_TARGET_RELAY,
             "RelayProtocol({}).connected peer={}",
             version,
@@ -844,7 +844,7 @@ impl CKBProtocolHandler for Relayer {
         _nc: Arc<dyn CKBProtocolContext + Sync>,
         peer_index: PeerIndex,
     ) {
-        info_target!(
+        debug_target!(
             crate::LOG_TARGET_RELAY,
             "RelayProtocol.disconnected peer={}",
             peer_index
