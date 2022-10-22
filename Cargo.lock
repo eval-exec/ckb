@@ -1314,6 +1314,8 @@ dependencies = [
  "ckb-constant",
  "ckb-dao",
  "ckb-dao-utils",
+ "ckb-db",
+ "ckb-db-schema",
  "ckb-error",
  "ckb-hash",
  "ckb-launcher",
@@ -1331,11 +1333,13 @@ dependencies = [
  "ckb-util",
  "ckb-verification",
  "ckb-verification-traits",
+ "crossbeam-queue",
  "dashmap",
  "faketime",
  "faux",
  "futures",
  "governor",
+ "iter_tools",
  "keyed_priority_queue",
  "lru",
  "once_cell",
@@ -1685,6 +1689,16 @@ dependencies = [
  "lazy_static",
  "memoffset",
  "scopeguard",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cd42583b04998a5363558e5f9291ee5a5ff6b49944332103f251e7479a82aa7"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -2591,6 +2605,15 @@ name = "is_sorted"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357376465c37db3372ef6a00585d336ed3d0f11d4345eef77ebcb05865392b21"
+
+[[package]]
+name = "iter_tools"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531cafdc99b3b3252bb32f5620e61d56b19415efc19900b12d1b2e7483854897"
+dependencies = [
+ "itertools",
+]
 
 [[package]]
 name = "itertools"
