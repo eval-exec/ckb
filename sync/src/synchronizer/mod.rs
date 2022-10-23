@@ -33,7 +33,7 @@ use ckb_network::{
     ServiceControl, SupportProtocols,
 };
 use ckb_store::{ChainDB, ChainStore};
-use ckb_types::packed::{Header, HeaderVec, SendBlock};
+use ckb_types::packed::{BlockReader, Header, HeaderVec, SendBlock};
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
@@ -648,8 +648,8 @@ impl CKBProtocolHandler for Synchronizer {
             );
             let store = ChainDB::new(db, Default::default());
 
-            let headers = ArrayQueue::new(4_000);
-            let blocks = ArrayQueue::new(8_000_000);
+            let mut headers = Vec::with_capacity(4_000);
+            let mut blocks = Vec::with_capacity(8_000_000);
 
             info!("debug, prepare headers and body queue");
             let mut header_vec: Vec<Header> = Vec::new();
@@ -660,18 +660,16 @@ impl CKBProtocolHandler for Synchronizer {
                 header_vec.push(header);
 
                 if height % 2000 == 0 {
-                    headers
-                        .push(
-                            HeaderVec::new_builder()
-                                .extend(header_vec.clone().into_iter())
-                                .build(),
-                        )
-                        .unwrap();
+                    headers.push(
+                        HeaderVec::new_builder()
+                            .extend(header_vec.clone().into_iter())
+                            .build(),
+                    );
                     header_vec.clear();
                 }
 
                 let block = store.get_packed_block(&block_hash).unwrap();
-                blocks.push(block).unwrap();
+                blocks.push(block);
             }
 
             info!("debug, headers, and body queue is full");
@@ -698,8 +696,7 @@ impl CKBProtocolHandler for Synchronizer {
 
             info!("debug, insert bodies...");
             let now = std::time::Instant::now();
-            while !blocks.is_empty() {
-                let block = blocks.pop().unwrap();
+            blocks.into_iter().for_each(|block| {
                 if !BlockProcess::new(
                     SendBlock::new_builder().block(block).build().as_reader(),
                     self,
@@ -710,8 +707,7 @@ impl CKBProtocolHandler for Synchronizer {
                 {
                     info!("debug, insert block not ok")
                 }
-            }
-
+            });
             info!(
                 "debug, bodies insert complete, timecost: {}s",
                 Instant::now().duration_since(now).as_secs()
