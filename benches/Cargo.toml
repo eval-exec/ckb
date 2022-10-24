@@ -42,5 +42,3 @@ harness = false
 [features]
 default = []
 ci = []
-portable = ["ckb-store/portable", "ckb-chain/portable"]
-march-native = ["ckb-store/march-native", "ckb-chain/march-native"]

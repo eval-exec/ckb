@@ -42,5 +42,3 @@ tempfile = "3.0"
 [features]
 default = []
 mock = ["faux"]
-portable = ["ckb-store/portable"]
-march-native = ["ckb-store/march-native"]

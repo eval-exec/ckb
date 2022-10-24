@@ -23,5 +23,3 @@ tempfile = "3.0"
 ckb-app-config = { path = "../util/app-config", version = "= 0.105.0-pre" }
 
 [features]
-portable = ["ckb-db/portable"]
-march-native = ["ckb-db/march-native"]

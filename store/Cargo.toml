@@ -24,5 +24,3 @@ ckb-freezer = { path = "../freezer", version = "= 0.105.0-pre" }
 tempfile = "3.0"
 
 [features]
-portable = ["ckb-db/portable"]
-march-native = ["ckb-db/march-native"]

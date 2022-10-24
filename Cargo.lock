@@ -140,9 +140,9 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.60.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -286,6 +286,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "bzip2-sys"
+version = "0.1.11+1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "736a955f3fa7875102d57c82b8cac37ec45224a07fd32d58f9f7a186b6cd4cdc"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
 ]
 
 [[package]]
@@ -595,8 +606,8 @@ dependencies = [
  "ckb-db-schema",
  "ckb-error",
  "ckb-logger",
- "ckb-rocksdb",
  "libc",
+ "rocksdb",
  "tempfile",
 ]
 
@@ -690,13 +701,13 @@ dependencies = [
  "ckb-jsonrpc-types",
  "ckb-logger",
  "ckb-notify",
- "ckb-rocksdb",
  "ckb-stop-handler",
  "ckb-store",
  "ckb-types",
  "numext-fixed-uint",
  "rand 0.8.5",
  "rhai",
+ "rocksdb",
  "serde",
  "serde_json",
  "tempfile",
@@ -766,20 +777,6 @@ dependencies = [
  "num_cpus",
  "once_cell",
  "tempfile",
-]
-
-[[package]]
-name = "ckb-librocksdb-sys"
-version = "7.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d106bb32241da368e67ce9a36545e1cc3c31b7faa9321817199b69bf1e085b4a"
-dependencies = [
- "bindgen",
- "cc",
- "glob",
- "libc",
- "pkg-config",
- "rust-ini",
 ]
 
 [[package]]
@@ -1055,17 +1052,6 @@ dependencies = [
  "ckb-occupied-capacity",
  "ckb-store",
  "ckb-types",
- "tempfile",
-]
-
-[[package]]
-name = "ckb-rocksdb"
-version = "0.18.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87b89828fd7e60e4d857f6f1a2f40343114eece1ca20859d4ca8371d4e00ce28"
-dependencies = [
- "ckb-librocksdb-sys",
- "libc",
  "tempfile",
 ]
 
@@ -1825,12 +1811,6 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
-
-[[package]]
-name = "dlv-list"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0688c2a7f92e427f44895cd63841bff7b29f8d7a1648b9e7e07a4a365b2e1257"
 
 [[package]]
 name = "eaglesong"
@@ -2753,6 +2733,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33a33a362ce288760ec6a508b94caaec573ae7d3bbbd91b87aa0bad4456839db"
 
 [[package]]
+name = "librocksdb-sys"
+version = "0.8.0+7.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "611804e4666a25136fcc5f8cf425ab4d26c7f74ea245ffe92ea23b85b6420b5d"
+dependencies = [
+ "bindgen",
+ "bzip2-sys",
+ "cc",
+ "glob",
+ "libc",
+ "libz-sys",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9702761c3935f8cc2f101793272e202c72b99da8f4224a19ddcf1279a6450bbf"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3174,16 +3179,6 @@ dependencies = [
  "opentelemetry",
  "prometheus",
  "protobuf",
-]
-
-[[package]]
-name = "ordered-multimap"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccd746e37177e1711c20dd619a1620f34f5c8b569c53590a72dedd5344d8924a"
-dependencies = [
- "dlv-list",
- "hashbrown 0.12.1",
 ]
 
 [[package]]
@@ -3773,13 +3768,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-ini"
-version = "0.18.0"
+name = "rocksdb"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6d5f2436026b4f6e79dc829837d467cc7e9a55ee40e750d716713540715a2df"
+checksum = "7e9562ea1d70c0cc63a34a22d977753b50cca91cc6b6527750463bd5dd8697bc"
 dependencies = [
- "cfg-if 1.0.0",
- "ordered-multimap",
+ "libc",
+ "librocksdb-sys",
 ]
 
 [[package]]
