@@ -74,7 +74,7 @@ impl ChainController {
     ///
     /// [BlockVerifier] [NonContextualBlockTxsVerifier] [ContextualBlockVerifier] will performed
     pub fn process_block(&self, block: Arc<BlockView>) -> Result<bool, Error> {
-        self.internal_process_block(block, Switch::NONE)
+        self.internal_process_block(block, Switch::DISABLE_ALL)
     }
 
     /// Internal method insert block for test
