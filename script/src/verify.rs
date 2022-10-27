@@ -465,7 +465,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
                     }
                     Ok(*groups_used_cycles.lock().unwrap())
                 }
-                Err(err) => return Err(err.into()),
+                Err(err) => Err(err.into()),
             }
         }
     }

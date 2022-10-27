@@ -20,8 +20,8 @@ use crate::{Status, StatusCode};
 use ckb_chain::chain::ChainController;
 use ckb_channel as channel;
 use ckb_constant::sync::{
-    BAD_MESSAGE_BAN_TIME, CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME,
-    INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
+    CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME, INIT_BLOCKS_IN_TRANSIT_PER_PEER,
+    MAX_TIP_AGE,
 };
 use ckb_db::RocksDB;
 use ckb_db_schema::COLUMNS;
@@ -29,20 +29,18 @@ use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
 use ckb_metrics::metrics;
 use ckb_network::{
-    async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerId, PeerIndex,
-    ServiceControl, SupportProtocols,
+    async_trait, bytes::Bytes, CKBProtocolContext, CKBProtocolHandler, PeerIndex, ServiceControl,
+    SupportProtocols,
 };
 use ckb_store::{ChainDB, ChainStore};
-use ckb_types::packed::{BlockReader, Header, HeaderVec, SendBlock};
+use ckb_types::packed::{Header, HeaderVec, SendBlock};
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
     prelude::*,
 };
-use crossbeam_queue::ArrayQueue;
 use faketime::unix_time_as_millis;
 use iter_tools::Itertools;
-use std::rc::Rc;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -648,12 +646,15 @@ impl CKBProtocolHandler for Synchronizer {
             );
             let store = ChainDB::new(db, Default::default());
 
-            let mut headers = Vec::with_capacity(4_000);
-            let mut blocks = Vec::with_capacity(8_000_000);
+            let headers_count = 4000_usize;
+            let all_heights = headers_count * 2000;
+
+            let mut headers = Vec::with_capacity(headers_count);
+            let mut blocks = Vec::with_capacity(all_heights);
 
             info!("debug, prepare headers and body queue");
             let mut header_vec: Vec<Header> = Vec::new();
-            for height in 1..=8_000_000 {
+            for height in 1..=all_heights {
                 let block_numebr: BlockNumber = height as u64;
                 let block_hash = store.get_block_hash(block_numebr).unwrap();
                 let header = store.get_packed_block_header(&block_hash).unwrap();
@@ -670,6 +671,9 @@ impl CKBProtocolHandler for Synchronizer {
 
                 let block = store.get_packed_block(&block_hash).unwrap();
                 blocks.push(block);
+                if blocks.len() % 2000 == 0 {
+                    info!("debug, prepare headers and body queue, height: {}", height);
+                }
             }
 
             info!("debug, headers, and body queue is full");
