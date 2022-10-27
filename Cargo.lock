@@ -1224,6 +1224,7 @@ dependencies = [
  "faster-hex",
  "proptest",
  "rand 0.8.5",
+ "rayon",
  "serde",
  "tempfile",
  "tiny-keccak",

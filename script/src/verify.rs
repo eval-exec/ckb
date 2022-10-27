@@ -27,6 +27,7 @@ use ckb_types::{
     packed::{Byte32, Byte32Vec, BytesVec, CellInputVec, CellOutput, OutPoint, Script},
     prelude::*,
 };
+use rayon::prelude::*;
 
 use ckb_vm::{
     snapshot::{resume, Snapshot},
@@ -35,6 +36,7 @@ use ckb_vm::{
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 mod tests;
@@ -61,25 +63,30 @@ enum DataGuard {
 }
 
 /// LazyData wrapper make sure not-loaded data will be loaded only after one access
-#[derive(Debug, PartialEq, Eq, Clone)]
-struct LazyData(RefCell<DataGuard>);
+#[derive(Debug, Clone)]
+struct LazyData(Arc<Mutex<RefCell<DataGuard>>>);
 
 impl LazyData {
     fn from_cell_meta(cell_meta: &CellMeta) -> LazyData {
         match &cell_meta.mem_cell_data {
-            Some(data) => LazyData(RefCell::new(DataGuard::Loaded(data.to_owned()))),
-            None => LazyData(RefCell::new(DataGuard::NotLoaded(
+            Some(data) => LazyData(Arc::new(Mutex::new(RefCell::new(DataGuard::Loaded(
+                data.to_owned(),
+            ))))),
+            None => LazyData(Arc::new(Mutex::new(RefCell::new(DataGuard::NotLoaded(
                 cell_meta.out_point.clone(),
-            ))),
+            ))))),
         }
     }
 
     fn access<DL: CellDataProvider>(&self, data_loader: &DL) -> Bytes {
-        let guard = self.0.borrow().to_owned();
+        let guard = self.0.lock().unwrap().borrow().to_owned();
         match guard {
             DataGuard::NotLoaded(out_point) => {
                 let data = data_loader.get_cell_data(&out_point).expect("cell data");
-                self.0.replace(DataGuard::Loaded(data.to_owned()));
+                self.0
+                    .lock()
+                    .unwrap()
+                    .replace(DataGuard::Loaded(data.to_owned()));
                 data
             }
             DataGuard::Loaded(bytes) => bytes,
@@ -87,16 +94,16 @@ impl LazyData {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 enum Binaries {
-    Unique(Byte32, LazyData),
-    Duplicate(Byte32, LazyData),
+    Unique(Byte32, Arc<LazyData>),
+    Duplicate(Byte32, Arc<LazyData>),
     Multiple,
 }
 
 impl Binaries {
     fn new(data_hash: Byte32, data: LazyData) -> Self {
-        Self::Unique(data_hash, data)
+        Self::Unique(data_hash, Arc::new(data))
     }
 
     fn merge(&mut self, data_hash: &Byte32) {
@@ -118,24 +125,24 @@ impl Binaries {
 /// FlatBufferBuilder owned `Vec<u8>` that grows as needed, in the
 /// future, we might refactor this to share buffer to achieve zero-copy
 pub struct TransactionScriptsVerifier<'a, DL> {
-    data_loader: &'a DL,
+    data_loader: Arc<Mutex<&'a DL>>,
 
-    debug_printer: Box<dyn Fn(&Byte32, &str)>,
+    debug_printer: Arc<dyn Fn(&Byte32, &str) + Sync + Send>,
 
     outputs: Vec<CellMeta>,
     rtx: &'a ResolvedTransaction,
 
-    binaries_by_data_hash: HashMap<Byte32, LazyData>,
-    binaries_by_type_hash: HashMap<Byte32, Binaries>,
+    binaries_by_data_hash: HashMap<Byte32, Box<LazyData>>,
+    binaries_by_type_hash: HashMap<Byte32, Box<Binaries>>,
 
     lock_groups: BTreeMap<Byte32, ScriptGroup>,
     type_groups: BTreeMap<Byte32, ScriptGroup>,
 
     #[cfg(test)]
-    skip_pause: RefCell<bool>,
+    skip_pause: Arc<Mutex<RefCell<bool>>>,
 }
 
-impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, DL> {
+impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifier<'_, DL> {
     /// Creates a script verifier for the transaction.
     ///
     /// ## Params
@@ -144,7 +151,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
     /// * `data_loader` - used to load cell data.
     pub fn new(
         rtx: &'a ResolvedTransaction,
-        data_loader: &'a DL,
+        data_loader: Arc<Mutex<&'a DL>>,
     ) -> TransactionScriptsVerifier<'a, DL> {
         let tx_hash = rtx.transaction.hash();
         let resolved_cell_deps = &rtx.resolved_cell_deps;
@@ -170,20 +177,24 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
             })
             .collect();
 
-        let mut binaries_by_data_hash: HashMap<Byte32, LazyData> = HashMap::default();
-        let mut binaries_by_type_hash: HashMap<Byte32, Binaries> = HashMap::default();
+        let mut binaries_by_data_hash: HashMap<Byte32, Box<LazyData>> = HashMap::default();
+        let mut binaries_by_type_hash: HashMap<Byte32, Box<Binaries>> = HashMap::default();
         for cell_meta in resolved_cell_deps {
             let data_hash = data_loader
+                .lock()
+                .unwrap()
                 .load_cell_data_hash(cell_meta)
                 .expect("cell data hash");
             let lazy = LazyData::from_cell_meta(cell_meta);
-            binaries_by_data_hash.insert(data_hash.to_owned(), lazy.to_owned());
+            binaries_by_data_hash.insert(data_hash.to_owned(), Box::new(lazy.to_owned()));
 
             if let Some(t) = &cell_meta.cell_output.type_().to_opt() {
                 binaries_by_type_hash
                     .entry(t.calc_script_hash())
                     .and_modify(|bin| bin.merge(&data_hash))
-                    .or_insert_with(|| Binaries::new(data_hash.to_owned(), lazy.to_owned()));
+                    .or_insert_with(|| {
+                        Box::new(Binaries::new(data_hash.to_owned(), lazy.to_owned()))
+                    });
             }
         }
 
@@ -221,7 +232,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
             rtx,
             lock_groups,
             type_groups,
-            debug_printer: Box::new(
+            debug_printer: Arc::new(
                 #[allow(unused_variables)]
                 |hash: &Byte32, message: &str| {
                     #[cfg(feature = "logging")]
@@ -229,7 +240,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
                 },
             ),
             #[cfg(test)]
-            skip_pause: RefCell::new(false),
+            skip_pause: Arc::new(Mutex::new(RefCell::new(false))),
         }
     }
 
@@ -242,13 +253,14 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
     ///
     /// * `hash: &Byte32`: this is the script hash of currently running script group.
     /// * `message: &str`: message passed to the debug syscall.
-    pub fn set_debug_printer<F: Fn(&Byte32, &str) + 'static>(&mut self, func: F) {
-        self.debug_printer = Box::new(func);
+    pub fn set_debug_printer<F: Fn(&Byte32, &str) + 'static + Sync + Send>(&mut self, func: F) {
+        self.debug_printer = Arc::new(func);
     }
 
     #[cfg(test)]
     pub(crate) fn set_skip_pause(&mut self, skip_pause: bool) {
-        *self.skip_pause.borrow_mut() = skip_pause;
+        // give skip_pause to self
+        self.skip_pause.lock().unwrap().replace(skip_pause);
     }
 
     #[inline]
@@ -292,7 +304,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
 
     fn build_exec(&'a self, group_inputs: &'a [usize], group_outputs: &'a [usize]) -> Exec<'a, DL> {
         Exec::new(
-            self.data_loader,
+            &self.data_loader.lock().unwrap(),
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -312,7 +324,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         group_outputs: &'a [usize],
     ) -> LoadCell<'a, DL> {
         LoadCell::new(
-            self.data_loader,
+            &self.data_loader.lock().unwrap(),
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -327,7 +339,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         group_outputs: &'a [usize],
     ) -> LoadCellData<'a, DL> {
         LoadCellData::new(
-            self.data_loader,
+            &self.data_loader.lock().unwrap(),
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -336,7 +348,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         )
     }
 
-    fn build_load_input(&self, group_inputs: &'a [usize]) -> LoadInput {
+    fn build_load_input(&self, group_inputs: &'a [usize]) -> LoadInput<'a> {
         LoadInput::new(self.inputs(), group_inputs)
     }
 
@@ -346,7 +358,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
 
     fn build_load_header(&'a self, group_inputs: &'a [usize]) -> LoadHeader<'a, DL> {
         LoadHeader::new(
-            self.data_loader,
+            &self.data_loader.lock().unwrap(),
             self.header_deps(),
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -373,16 +385,20 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         match script_hash_type {
             ScriptHashType::Data | ScriptHashType::Data1 => {
                 if let Some(lazy) = self.binaries_by_data_hash.get(&script.code_hash()) {
-                    Ok(lazy.access(self.data_loader))
+                    Ok(lazy.access(*self.data_loader.lock().unwrap()))
                 } else {
                     Err(ScriptError::InvalidCodeHash)
                 }
             }
             ScriptHashType::Type => {
-                if let Some(ref bin) = self.binaries_by_type_hash.get(&script.code_hash()) {
-                    match bin {
-                        Binaries::Unique(_, ref lazy) => Ok(lazy.access(self.data_loader)),
-                        Binaries::Duplicate(_, ref lazy) => Ok(lazy.access(self.data_loader)),
+                if let Some(bin) = self.binaries_by_type_hash.get(&script.code_hash()) {
+                    match **bin {
+                        Binaries::Unique(_, ref lazy) => {
+                            Ok(lazy.access(*self.data_loader.lock().unwrap()))
+                        }
+                        Binaries::Duplicate(_, ref lazy) => {
+                            Ok(lazy.access(*self.data_loader.lock().unwrap()))
+                        }
                         Binaries::Multiple => Err(ScriptError::MultipleMatches),
                     }
                 } else {
@@ -414,27 +430,44 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
     ///
     /// It returns the total consumed cycles on success, Otherwise it returns the verification error.
     pub fn verify(&self, max_cycles: Cycle) -> Result<Cycle, Error> {
-        let mut cycles: Cycle = 0;
-
-        // Now run each script group
-        for (_hash, group) in self.groups() {
-            // max_cycles must reduce by each group exec
-            let used_cycles = self
-                .verify_script_group(group, max_cycles - cycles)
-                .map_err(|e| {
+        let mut groups_used_cycles = Mutex::new(0 as Cycle);
+        {
+            match self.groups().par_bridge().try_for_each(|(hash, group)| {
+                info!("debug, verify each group");
+                return match self.verify_script_group(group, max_cycles).map_err(|e| {
                     #[cfg(feature = "logging")]
                     info!(
                         "Error validating script group {} of transaction {}: {}",
-                        _hash,
+                        hash,
                         self.hash(),
                         e
                     );
                     e.source(group)
-                })?;
-
-            cycles = wrapping_cycles_add(cycles, used_cycles, group)?;
+                }) {
+                    Ok(used_cycles) => {
+                        let mut group_used_cycles = groups_used_cycles.lock().unwrap();
+                        match wrapping_cycles_add(*group_used_cycles, used_cycles, group) {
+                            Ok(all_cycles) => {
+                                *group_used_cycles = all_cycles;
+                                Ok(())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    }
+                    Err(err) => Err(err),
+                };
+            }) {
+                Ok(_) => {
+                    if groups_used_cycles.lock().unwrap().cmp(&max_cycles).is_ge() {
+                        return Err(ScriptError::ExceededMaximumCycles(max_cycles)
+                            .unknown_source()
+                            .into());
+                    }
+                    Ok(*groups_used_cycles.lock().unwrap())
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
-        Ok(cycles)
     }
 
     fn build_state(
@@ -466,7 +499,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
     pub fn resumable_verify(&self, limit_cycles: Cycle) -> Result<VerifyResult, Error> {
         let mut cycles = 0;
 
-        let groups: Vec<_> = self.groups().collect();
+        let groups: Vec<(&Byte32, &ScriptGroup)> = self.groups().collect();
         for (idx, (_hash, group)) in groups.iter().enumerate() {
             // vm should early return invalid cycles
             let remain_cycles = limit_cycles.checked_sub(cycles).ok_or_else(|| {
@@ -771,7 +804,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
 
     fn verify_script_group(
         &self,
-        group: &ScriptGroup,
+        group: &'a ScriptGroup,
         max_cycles: Cycle,
     ) -> Result<Cycle, ScriptError> {
         if group.script.code_hash() == TYPE_ID_CODE_HASH.pack()
@@ -788,7 +821,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         }
     }
     /// Returns all script groups.
-    pub fn groups(&self) -> impl Iterator<Item = (&'_ Byte32, &'_ ScriptGroup)> {
+    pub fn groups(&self) -> impl Iterator<Item = (&Byte32, &ScriptGroup)> {
         self.lock_groups.iter().chain(self.type_groups.iter())
     }
 
@@ -867,10 +900,13 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
                     &script_group.output_indices,
                 ),
             ),
-            Box::new(Debugger::new(current_script_hash, &self.debug_printer)),
+            Box::new(Debugger::new(
+                current_script_hash,
+                self.debug_printer.as_ref(),
+            )),
         ];
         #[cfg(test)]
-        syscalls.push(Box::new(Pause::new(&self.skip_pause)));
+        syscalls.push(Box::new(Pause::new(&self.skip_pause.lock().unwrap())));
         if script_version >= ScriptVersion::V1 {
             syscalls.append(&mut vec![
                 Box::new(self.build_vm_version()),
@@ -901,7 +937,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider> TransactionScriptsVerifier<'a, D
         Ok(machine)
     }
 
-    fn run(&self, script_group: &ScriptGroup, max_cycles: Cycle) -> Result<Cycle, ScriptError> {
+    fn run(&self, script_group: &'a ScriptGroup, max_cycles: Cycle) -> Result<Cycle, ScriptError> {
         let program = self.extract_script(&script_group.script)?;
         let mut machine = self.build_machine(script_group, max_cycles)?;
 

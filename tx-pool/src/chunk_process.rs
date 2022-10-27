@@ -120,7 +120,7 @@ impl ChunkProcess {
         }
     }
 
-    fn loop_resume<'a, DL: CellDataProvider + HeaderProvider>(
+    fn loop_resume<'a, DL: CellDataProvider + HeaderProvider + Sync>(
         &mut self,
         rtx: &'a ResolvedTransaction,
         data_loader: &'a DL,
@@ -335,7 +335,10 @@ fn exceeded_maximum_cycles_error<DL: CellDataProvider + HeaderProvider>(
     verifier: &ScriptVerifier<'_, DL>,
     max_cycles: Cycle,
     current: usize,
-) -> Error {
+) -> Error
+where
+    DL: Sync,
+{
     verifier
         .inner()
         .groups()

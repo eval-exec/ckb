@@ -16,6 +16,7 @@ use ckb_types::{
     prelude::*,
 };
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 /// The time-related TX verification
 ///
@@ -105,7 +106,7 @@ pub struct ContextualTransactionVerifier<'a, DL> {
 
 impl<'a, DL> ContextualTransactionVerifier<'a, DL>
 where
-    DL: CellDataProvider + HeaderProvider + EpochProvider,
+    DL: CellDataProvider + HeaderProvider + EpochProvider + Sync,
 {
     /// Creates a new ContextualTransactionVerifier
     pub fn new(
@@ -182,7 +183,7 @@ pub struct TransactionVerifier<'a, DL> {
     pub(crate) contextual: ContextualTransactionVerifier<'a, DL>,
 }
 
-impl<'a, DL: HeaderProvider + CellDataProvider + EpochProvider> TransactionVerifier<'a, DL> {
+impl<'a, DL: HeaderProvider + CellDataProvider + EpochProvider + Sync> TransactionVerifier<'a, DL> {
     /// Creates a new TransactionVerifier
     pub fn new(
         rtx: &'a ResolvedTransaction,
@@ -293,11 +294,14 @@ pub struct ScriptVerifier<'a, DL> {
     inner: TransactionScriptsVerifier<'a, DL>,
 }
 
-impl<'a, DL: CellDataProvider + HeaderProvider> ScriptVerifier<'a, DL> {
+impl<'a, DL: CellDataProvider + HeaderProvider + Sync> ScriptVerifier<'a, DL> {
     /// Creates a new ScriptVerifier
     pub fn new(resolved_transaction: &'a ResolvedTransaction, data_loader: &'a DL) -> Self {
         ScriptVerifier {
-            inner: TransactionScriptsVerifier::new(resolved_transaction, data_loader),
+            inner: TransactionScriptsVerifier::new(
+                resolved_transaction,
+                Arc::new(Mutex::new(data_loader)),
+            ),
         }
     }
 
