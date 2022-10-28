@@ -1315,8 +1315,6 @@ dependencies = [
  "ckb-constant",
  "ckb-dao",
  "ckb-dao-utils",
- "ckb-db",
- "ckb-db-schema",
  "ckb-error",
  "ckb-hash",
  "ckb-launcher",
@@ -1512,8 +1510,7 @@ dependencies = [
 [[package]]
 name = "ckb-vm"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f1126bf0240d100234bc06efa7020f0d50ca35fe90e5ac7cac1b7721e1bacb7"
+source = "git+https://github.com/nervosnetwork/ckb-vm?rev=5c464b31e60eb281380a885b2b1a1311360572bc#5c464b31e60eb281380a885b2b1a1311360572bc"
 dependencies = [
  "byteorder",
  "bytes 1.2.1",
@@ -1530,8 +1527,7 @@ dependencies = [
 [[package]]
 name = "ckb-vm-definitions"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14739bf59648c169de9257ec7dd6aba1aeb6a41725d636005f1c91853df58fcc"
+source = "git+https://github.com/nervosnetwork/ckb-vm?rev=5c464b31e60eb281380a885b2b1a1311360572bc#5c464b31e60eb281380a885b2b1a1311360572bc"
 
 [[package]]
 name = "clang-sys"

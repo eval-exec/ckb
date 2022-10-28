@@ -36,7 +36,8 @@ use ckb_vm::{
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+use std::sync::{atomic, Arc, Mutex};
 
 #[cfg(test)]
 mod tests;
@@ -422,7 +423,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
     ///
     /// It returns the total consumed cycles on success, Otherwise it returns the verification error.
     pub fn verify(&self, max_cycles: Cycle) -> Result<Cycle, Error> {
-        let mut groups_used_cycles = Mutex::new(0 as Cycle);
+        let mut groups_used_cycles = atomic::AtomicU64::new(0);
         {
             match self.groups().par_bridge().try_for_each(|(hash, group)| {
                 return match self.verify_script_group(group, max_cycles).map_err(|e| {
@@ -436,13 +437,16 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
                     e.source(group)
                 }) {
                     Ok(used_cycles) => {
-                        let mut group_used_cycles = groups_used_cycles.lock().unwrap();
-                        match wrapping_cycles_add(*group_used_cycles, used_cycles, group) {
-                            Ok(all_cycles) => {
-                                *group_used_cycles = all_cycles;
-                                Ok(())
-                            }
-                            Err(err) => Err(err),
+                        let old_groups_used_cycles =
+                            groups_used_cycles.fetch_add(used_cycles.into_u64(), Ordering::Acquire);
+                        if groups_used_cycles.load(Ordering::Acquire) < old_groups_used_cycles {
+                            Err(ScriptError::CyclesOverflow(
+                                old_groups_used_cycles.into_u64() as Cycle,
+                                used_cycles.into_u64() as Cycle,
+                            )
+                            .source(group))
+                        } else {
+                            Ok(())
                         }
                     }
                     Err(err) => Err(err),
