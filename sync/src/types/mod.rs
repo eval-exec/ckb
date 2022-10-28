@@ -1249,6 +1249,10 @@ impl SyncShared {
     pub fn consensus(&self) -> &Consensus {
         self.shared.consensus()
     }
+    /// Makes a clone of the `Arc<Consensus>`
+    pub fn cloned_consensus(&self) -> Arc<Consensus> {
+        self.shared.cloned_consensus()
+    }
 
     /// Insert new block to chain store
     pub fn insert_new_block(

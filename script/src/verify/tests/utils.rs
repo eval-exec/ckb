@@ -207,7 +207,8 @@ impl TransactionScriptsVerifierWithEnv {
         F: FnMut(TransactionScriptsVerifier<'_, DataLoaderWrapper<'_, ChainDB>>) -> R,
     {
         let data_loader = DataLoaderWrapper::new(&self.store);
-        let verifier = TransactionScriptsVerifier::new(rtx, &data_loader);
+        let verifier =
+            TransactionScriptsVerifier::new(Arc::new(rtx.clone()), Arc::new(data_loader));
         verify_func(verifier)
     }
 }

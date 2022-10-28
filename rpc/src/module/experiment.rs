@@ -5,6 +5,7 @@ use ckb_jsonrpc_types::{
     Capacity, DaoWithdrawingCalculationKind, EstimateCycles, OutPoint, Transaction,
 };
 use ckb_shared::{shared::Shared, Snapshot};
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::ChainStore;
 use ckb_types::{core, packed, prelude::*};
 use jsonrpc_core::Result;
@@ -180,7 +181,7 @@ impl ExperimentRpc for ExperimentRpcImpl {
         let snapshot: &Snapshot = &self.shared.snapshot();
         let consensus = snapshot.consensus();
         let out_point: packed::OutPoint = out_point.into();
-        let data_loader = snapshot.as_data_provider();
+        let data_loader = snapshot.borrow_as_data_loader();
         let calculator = DaoCalculator::new(consensus, &data_loader);
         match kind {
             DaoWithdrawingCalculationKind::WithdrawingHeaderHash(withdrawing_header_hash) => {

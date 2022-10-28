@@ -10,6 +10,7 @@ use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::error_target;
 use ckb_merkle_mountain_range::MMRStore;
 use ckb_reward_calculator::RewardCalculator;
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::ChainStore;
 use ckb_traits::HeaderProvider;
 use ckb_types::{
@@ -37,14 +38,23 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 
 /// Context for context-dependent block verification
-pub struct VerifyContext<'a, CS> {
-    pub(crate) store: &'a CS,
-    pub(crate) consensus: &'a Consensus,
+pub struct VerifyContext<CS> {
+    pub(crate) store: Arc<CS>,
+    pub(crate) consensus: Arc<Consensus>,
 }
 
-impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> VerifyContext<'a, CS> {
+impl<CS> Clone for VerifyContext<CS> {
+    fn clone(&self) -> Self {
+        VerifyContext {
+            store: Arc::clone(&self.store),
+            consensus: Arc::clone(&self.consensus),
+        }
+    }
+}
+
+impl<CS: ChainStore + VersionbitsIndexer> VerifyContext<CS> {
     /// Create new VerifyContext from `Store` and `Consensus`
-    pub fn new(store: &'a CS, consensus: &'a Consensus) -> Self {
+    pub fn new(store: Arc<CS>, consensus: Arc<Consensus>) -> Self {
         VerifyContext { store, consensus }
     }
 
@@ -52,24 +62,24 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> VerifyContext<'a, CS> {
         &self,
         parent: &HeaderView,
     ) -> Result<(Script, BlockReward), DaoError> {
-        RewardCalculator::new(self.consensus, self.store).block_reward_to_finalize(parent)
+        RewardCalculator::new(&self.consensus, self.store.as_ref()).block_reward_to_finalize(parent)
     }
 
     fn versionbits_active(&self, pos: DeploymentPos, header: &HeaderView) -> bool {
         self.consensus
-            .versionbits_state(pos, header, self.store)
+            .versionbits_state(pos, header, self.store.as_ref())
             .map(|state| state == ThresholdState::Active)
             .unwrap_or(false)
     }
 }
 
-impl<'a, CS: ChainStore<'a>> HeaderProvider for VerifyContext<'a, CS> {
+impl<CS: ChainStore> HeaderProvider for VerifyContext<CS> {
     fn get_header(&self, hash: &Byte32) -> Option<HeaderView> {
         self.store.get_block_header(hash)
     }
 }
 
-impl<'a, CS: ChainStore<'a>> HeaderChecker for VerifyContext<'a, CS> {
+impl<CS: ChainStore> HeaderChecker for VerifyContext<CS> {
     fn check_valid(&self, block_hash: &Byte32) -> Result<(), OutPointError> {
         if !self.store.is_main_chain(block_hash) {
             return Err(OutPointError::InvalidHeader(block_hash.clone()));
@@ -81,24 +91,24 @@ impl<'a, CS: ChainStore<'a>> HeaderChecker for VerifyContext<'a, CS> {
     }
 }
 
-impl<'a, CS: ChainStore<'a>> ConsensusProvider for VerifyContext<'a, CS> {
+impl<CS: ChainStore> ConsensusProvider for VerifyContext<CS> {
     fn get_consensus(&self) -> &Consensus {
-        self.consensus
+        &self.consensus
     }
 }
 
 pub struct UncleVerifierContext<'a, 'b, CS> {
     epoch: &'b EpochExt,
-    context: &'a VerifyContext<'a, CS>,
+    context: &'a VerifyContext<CS>,
 }
 
-impl<'a, 'b, CS: ChainStore<'a>> UncleVerifierContext<'a, 'b, CS> {
-    pub(crate) fn new(context: &'a VerifyContext<'a, CS>, epoch: &'b EpochExt) -> Self {
+impl<'a, 'b, CS: ChainStore> UncleVerifierContext<'a, 'b, CS> {
+    pub(crate) fn new(context: &'a VerifyContext<CS>, epoch: &'b EpochExt) -> Self {
         UncleVerifierContext { epoch, context }
     }
 }
 
-impl<'a, 'b, CS: ChainStore<'a>> UncleProvider for UncleVerifierContext<'a, 'b, CS> {
+impl<'a, 'b, CS: ChainStore> UncleProvider for UncleVerifierContext<'a, 'b, CS> {
     fn double_inclusion(&self, hash: &Byte32) -> bool {
         self.context.store.get_block_number(hash).is_some() || self.context.store.is_uncle(hash)
     }
@@ -106,7 +116,7 @@ impl<'a, 'b, CS: ChainStore<'a>> UncleProvider for UncleVerifierContext<'a, 'b, 
     fn descendant(&self, uncle: &HeaderView) -> bool {
         let parent_hash = uncle.data().raw().parent_hash();
         let uncle_number = uncle.number();
-        let store = self.context.store;
+        let store = &self.context.store;
 
         if store.get_block_number(&parent_hash).is_some() {
             return store
@@ -127,17 +137,17 @@ impl<'a, 'b, CS: ChainStore<'a>> UncleProvider for UncleVerifierContext<'a, 'b, 
     }
 
     fn consensus(&self) -> &Consensus {
-        self.context.consensus
+        &self.context.consensus
     }
 }
 
 pub struct TwoPhaseCommitVerifier<'a, CS> {
-    context: &'a VerifyContext<'a, CS>,
+    context: &'a VerifyContext<CS>,
     block: &'a BlockView,
 }
 
-impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> TwoPhaseCommitVerifier<'a, CS> {
-    pub fn new(context: &'a VerifyContext<'a, CS>, block: &'a BlockView) -> Self {
+impl<'a, CS: ChainStore + VersionbitsIndexer> TwoPhaseCommitVerifier<'a, CS> {
+    pub fn new(context: &'a VerifyContext<CS>, block: &'a BlockView) -> Self {
         TwoPhaseCommitVerifier { context, block }
     }
 
@@ -215,12 +225,12 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> TwoPhaseCommitVerifier<'a, CS>
 pub struct RewardVerifier<'a, 'b, CS> {
     resolved: &'a [ResolvedTransaction],
     parent: &'b HeaderView,
-    context: &'a VerifyContext<'a, CS>,
+    context: &'a VerifyContext<CS>,
 }
 
-impl<'a, 'b, CS: ChainStore<'a> + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
+impl<'a, 'b, CS: ChainStore + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
     pub fn new(
-        context: &'a VerifyContext<'a, CS>,
+        context: &'a VerifyContext<CS>,
         resolved: &'a [ResolvedTransaction],
         parent: &'b HeaderView,
     ) -> Self {
@@ -274,15 +284,15 @@ impl<'a, 'b, CS: ChainStore<'a> + VersionbitsIndexer> RewardVerifier<'a, 'b, CS>
 }
 
 struct DaoHeaderVerifier<'a, 'b, 'c, CS> {
-    context: &'a VerifyContext<'a, CS>,
+    context: &'a VerifyContext<CS>,
     resolved: &'a [ResolvedTransaction],
     parent: &'b HeaderView,
     header: &'c HeaderView,
 }
 
-impl<'a, 'b, 'c, CS: ChainStore<'a> + VersionbitsIndexer> DaoHeaderVerifier<'a, 'b, 'c, CS> {
+impl<'a, 'b, 'c, CS: ChainStore + VersionbitsIndexer> DaoHeaderVerifier<'a, 'b, 'c, CS> {
     pub fn new(
-        context: &'a VerifyContext<'a, CS>,
+        context: &'a VerifyContext<CS>,
         resolved: &'a [ResolvedTransaction],
         parent: &'b HeaderView,
         header: &'c HeaderView,
@@ -297,8 +307,8 @@ impl<'a, 'b, 'c, CS: ChainStore<'a> + VersionbitsIndexer> DaoHeaderVerifier<'a, 
 
     pub fn verify(&self) -> Result<(), Error> {
         let dao = DaoCalculator::new(
-            self.context.consensus,
-            &self.context.store.as_data_provider(),
+            &self.context.consensus,
+            &self.context.store.borrow_as_data_loader(),
         )
         .dao_field(self.resolved, self.parent)
         .map_err(|e| {
@@ -319,15 +329,15 @@ impl<'a, 'b, 'c, CS: ChainStore<'a> + VersionbitsIndexer> DaoHeaderVerifier<'a, 
 }
 
 struct BlockTxsVerifier<'a, CS> {
-    context: &'a VerifyContext<'a, CS>,
+    context: VerifyContext<CS>,
     header: HeaderView,
     handle: &'a Handle,
     txs_verify_cache: &'a Arc<RwLock<TxVerificationCache>>,
 }
 
-impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> BlockTxsVerifier<'a, CS> {
+impl<'a, CS: ChainStore + VersionbitsIndexer + 'static> BlockTxsVerifier<'a, CS> {
     pub fn new(
-        context: &'a VerifyContext<'a, CS>,
+        context: VerifyContext<CS>,
         header: HeaderView,
         handle: &'a Handle,
         txs_verify_cache: &'a Arc<RwLock<TxVerificationCache>>,
@@ -398,12 +408,13 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> BlockTxsVerifier<'a, CS> {
             .map(|(index, tx)| {
                 let tx_hash = tx.transaction.hash();
                 let tx_env = TxVerifyEnv::new_commit(&self.header);
+                let data_loader = Arc::clone(&self.context.store).as_data_loader();
                 if let Some(cache_entry) = fetched_cache.get(&tx_hash) {
                     match cache_entry {
                         CacheEntry::Completed(completed) => TimeRelativeTransactionVerifier::new(
                             tx,
-                            self.context.consensus,
-                            self.context,
+                            &self.context.consensus,
+                            data_loader,
                             &tx_env,
                         )
                         .verify()
@@ -417,8 +428,8 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> BlockTxsVerifier<'a, CS> {
                         .map(|_| (tx_hash, *completed)),
                         CacheEntry::Suspended(suspended) => ContextualTransactionVerifier::new(
                             tx,
-                            self.context.consensus,
-                            &self.context.store.as_data_provider(),
+                            &self.context.consensus,
+                            data_loader,
                             &tx_env,
                         )
                         .complete(
@@ -438,8 +449,8 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer> BlockTxsVerifier<'a, CS> {
                 } else {
                     ContextualTransactionVerifier::new(
                         tx,
-                        self.context.consensus,
-                        &self.context.store.as_data_provider(),
+                        &self.context.consensus,
+                        data_loader,
                         &tx_env,
                     )
                     .verify(
@@ -518,16 +529,16 @@ impl<'a> EpochVerifier<'a> {
 /// Check block extension.
 #[derive(Clone)]
 pub struct BlockExtensionVerifier<'a, 'b, CS, MS> {
-    context: &'a VerifyContext<'a, CS>,
+    context: &'a VerifyContext<CS>,
     chain_root_mmr: &'a ChainRootMMR<MS>,
     parent: &'b HeaderView,
 }
 
-impl<'a, 'b, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
+impl<'a, 'b, CS: ChainStore + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
     BlockExtensionVerifier<'a, 'b, CS, MS>
 {
     pub fn new(
-        context: &'a VerifyContext<'a, CS>,
+        context: &'a VerifyContext<CS>,
         chain_root_mmr: &'a ChainRootMMR<MS>,
         parent: &'b HeaderView,
     ) -> Self {
@@ -603,19 +614,19 @@ impl<'a, 'b, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>
 /// - [`RewardVerifier`](./struct.RewardVerifier.html)
 /// - [`BlockTxsVerifier`](./struct.BlockTxsVerifier.html)
 pub struct ContextualBlockVerifier<'a, CS, MS> {
-    context: &'a VerifyContext<'a, CS>,
+    context: VerifyContext<CS>,
     switch: Switch,
     handle: &'a Handle,
     txs_verify_cache: Arc<RwLock<TxVerificationCache>>,
     chain_root_mmr: &'a ChainRootMMR<MS>,
 }
 
-impl<'a, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
+impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDigest>>
     ContextualBlockVerifier<'a, CS, MS>
 {
     /// Create new ContextualBlockVerifier
     pub fn new(
-        context: &'a VerifyContext<'a, CS>,
+        context: VerifyContext<CS>,
         handle: &'a Handle,
         switch: Switch,
         txs_verify_cache: Arc<RwLock<TxVerificationCache>>,
@@ -632,9 +643,9 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
 
     /// Perform context-dependent verification checks for block
     pub fn verify(
-        &'a self,
-        resolved: &'a [ResolvedTransaction],
-        block: &'a BlockView,
+        &self,
+        resolved: &[ResolvedTransaction],
+        block: &BlockView,
     ) -> Result<(Cycle, Vec<Completed>), Error> {
         let parent_hash = block.data().header().raw().parent_hash();
         let header = block.header();
@@ -651,7 +662,7 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
         } else {
             self.context
                 .consensus
-                .next_epoch_ext(&parent, &self.context.store.as_data_provider())
+                .next_epoch_ext(&parent, &self.context.store.borrow_as_data_loader())
                 .ok_or_else(|| UnknownParentError {
                     parent_hash: parent.hash(),
                 })?
@@ -663,26 +674,31 @@ impl<'a, CS: ChainStore<'a> + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
         }
 
         if !self.switch.disable_uncles() {
-            let uncle_verifier_context = UncleVerifierContext::new(self.context, &epoch_ext);
+            let uncle_verifier_context = UncleVerifierContext::new(&self.context, &epoch_ext);
             UnclesVerifier::new(uncle_verifier_context, block).verify()?;
         }
 
         if !self.switch.disable_two_phase_commit() {
-            TwoPhaseCommitVerifier::new(self.context, block).verify()?;
+            TwoPhaseCommitVerifier::new(&self.context, block).verify()?;
         }
 
         if !self.switch.disable_daoheader() {
-            DaoHeaderVerifier::new(self.context, resolved, &parent, &block.header()).verify()?;
+            DaoHeaderVerifier::new(&self.context, resolved, &parent, &block.header()).verify()?;
         }
 
         if !self.switch.disable_reward() {
-            RewardVerifier::new(self.context, resolved, &parent).verify()?;
+            RewardVerifier::new(&self.context, resolved, &parent).verify()?;
         }
 
-        BlockExtensionVerifier::new(self.context, self.chain_root_mmr, &parent).verify(block)?;
+        BlockExtensionVerifier::new(&self.context, self.chain_root_mmr, &parent).verify(block)?;
 
-        let ret = BlockTxsVerifier::new(self.context, header, self.handle, &self.txs_verify_cache)
-            .verify(resolved, self.switch.disable_script())?;
+        let ret = BlockTxsVerifier::new(
+            self.context.clone(),
+            header,
+            self.handle,
+            &self.txs_verify_cache,
+        )
+        .verify(resolved, self.switch.disable_script())?;
         Ok(ret)
     }
 }

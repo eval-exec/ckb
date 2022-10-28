@@ -7,7 +7,8 @@ use ckb_jsonrpc_types::{
 };
 use ckb_logger::error;
 use ckb_reward_calculator::RewardCalculator;
-use ckb_shared::{shared::Shared, Snapshot};
+use ckb_shared::shared::Shared;
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::ChainStore;
 use ckb_traits::HeaderProvider;
 use ckb_types::core::tx_pool::TransactionWithStatus;
@@ -1920,14 +1921,12 @@ impl<'a> CyclesEstimator<'a> {
     }
 
     pub(crate) fn run(&self, tx: packed::Transaction) -> Result<EstimateCycles> {
-        let snapshot: &Snapshot = &self.shared.snapshot();
+        let snapshot = self.shared.snapshot();
         let consensus = snapshot.consensus();
         match resolve_transaction(tx.into_view(), &mut HashSet::new(), self, self) {
             Ok(resolved) => {
                 let max_cycles = consensus.max_block_cycles;
-                match ScriptVerifier::new(&resolved, &snapshot.as_data_provider())
-                    .verify(max_cycles)
-                {
+                match ScriptVerifier::new(&resolved, snapshot.as_data_loader()).verify(max_cycles) {
                     Ok(cycles) => Ok(EstimateCycles {
                         cycles: cycles.into(),
                     }),
