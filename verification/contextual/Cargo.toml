@@ -12,7 +12,7 @@ repository = "https://github.com/nervosnetwork/ckb"
 ckb-types = { path = "../../util/types", version = "= 0.106.0-pre" }
 ckb-store = { path = "../../store", version = "= 0.106.0-pre" }
 faketime = "0.2.0"
-rayon = "1.0"
+rayon = "1.5.3"
 ckb-traits = { path = "../../traits", version = "= 0.106.0-pre" }
 ckb-chain-spec = { path = "../../spec", version = "= 0.106.0-pre" }
 ckb-dao = { path = "../../util/dao", version = "= 0.106.0-pre" }

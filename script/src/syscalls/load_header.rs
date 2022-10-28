@@ -7,6 +7,7 @@ use crate::{
     },
 };
 use ckb_traits::HeaderProvider;
+use ckb_types::core::cell::ResolvedTransaction;
 use ckb_types::{
     core::{cell::CellMeta, HeaderView},
     packed::Byte32Vec,
@@ -16,34 +17,44 @@ use ckb_vm::{
     registers::{A0, A3, A4, A5, A7},
     Error as VMError, Register, SupportMachine, Syscalls,
 };
+use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct LoadHeader<'a, DL> {
-    data_loader: &'a DL,
+pub struct LoadHeader<DL> {
+    data_loader: DL,
     // This can only be used for liner search
-    header_deps: Byte32Vec,
-    resolved_inputs: &'a [CellMeta],
-    resolved_cell_deps: &'a [CellMeta],
-    group_inputs: &'a [usize],
+    rtx: Arc<ResolvedTransaction>,
+    group_inputs: Arc<Vec<usize>>,
 }
 
-impl<'a, DL: HeaderProvider + 'a> LoadHeader<'a, DL> {
+impl<DL: HeaderProvider + Sync> LoadHeader<DL> {
     pub fn new(
-        data_loader: &'a DL,
-        header_deps: Byte32Vec,
-        resolved_inputs: &'a [CellMeta],
-        resolved_cell_deps: &'a [CellMeta],
-        group_inputs: &'a [usize],
-    ) -> LoadHeader<'a, DL> {
+        data_loader: DL,
+        rtx: Arc<ResolvedTransaction>,
+        group_inputs: Arc<Vec<usize>>,
+    ) -> LoadHeader<DL> {
         LoadHeader {
             data_loader,
-            header_deps,
-            resolved_inputs,
-            resolved_cell_deps,
+            rtx,
             group_inputs,
         }
     }
 
+    // This can only be used for liner search
+    #[inline]
+    fn header_deps(&self) -> Byte32Vec {
+        self.rtx.transaction.header_deps()
+    }
+
+    #[inline]
+    fn resolved_inputs(&self) -> &Vec<CellMeta> {
+        &self.rtx.resolved_inputs
+    }
+
+    #[inline]
+    fn resolved_cell_deps(&self) -> &Vec<CellMeta> {
+        &self.rtx.resolved_cell_deps
+    }
     fn load_header(&self, cell_meta: &CellMeta) -> Option<HeaderView> {
         let block_hash = &cell_meta
             .transaction_info
@@ -51,7 +62,7 @@ impl<'a, DL: HeaderProvider + 'a> LoadHeader<'a, DL> {
             .expect("block_info of CellMeta should exists when load_header in syscall")
             .block_hash;
         if self
-            .header_deps
+            .header_deps()
             .clone()
             .into_iter()
             .any(|hash| &hash == block_hash)
@@ -65,18 +76,18 @@ impl<'a, DL: HeaderProvider + 'a> LoadHeader<'a, DL> {
     fn fetch_header(&self, source: Source, index: usize) -> Result<HeaderView, u8> {
         match source {
             Source::Transaction(SourceEntry::Input) => self
-                .resolved_inputs
+                .resolved_inputs()
                 .get(index)
                 .ok_or(INDEX_OUT_OF_BOUND)
                 .and_then(|cell_meta| self.load_header(cell_meta).ok_or(ITEM_MISSING)),
             Source::Transaction(SourceEntry::Output) => Err(INDEX_OUT_OF_BOUND),
             Source::Transaction(SourceEntry::CellDep) => self
-                .resolved_cell_deps
+                .resolved_cell_deps()
                 .get(index)
                 .ok_or(INDEX_OUT_OF_BOUND)
                 .and_then(|cell_meta| self.load_header(cell_meta).ok_or(ITEM_MISSING)),
             Source::Transaction(SourceEntry::HeaderDep) => self
-                .header_deps
+                .header_deps()
                 .get(index)
                 .ok_or(INDEX_OUT_OF_BOUND)
                 .and_then(|block_hash| {
@@ -87,7 +98,7 @@ impl<'a, DL: HeaderProvider + 'a> LoadHeader<'a, DL> {
                 .get(index)
                 .ok_or(INDEX_OUT_OF_BOUND)
                 .and_then(|actual_index| {
-                    self.resolved_inputs
+                    self.resolved_inputs()
                         .get(*actual_index)
                         .ok_or(INDEX_OUT_OF_BOUND)
                 })
@@ -133,7 +144,7 @@ impl<'a, DL: HeaderProvider + 'a> LoadHeader<'a, DL> {
     }
 }
 
-impl<'a, DL: HeaderProvider + 'a, Mac: SupportMachine> Syscalls<Mac> for LoadHeader<'a, DL> {
+impl<DL: HeaderProvider + Send + Sync, Mac: SupportMachine> Syscalls<Mac> for LoadHeader<DL> {
     fn initialize(&mut self, _machine: &mut Mac) -> Result<(), VMError> {
         Ok(())
     }

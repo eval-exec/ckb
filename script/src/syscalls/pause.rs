@@ -1,19 +1,20 @@
 use crate::syscalls::DEBUG_PAUSE;
 use ckb_vm::{registers::A7, Error as VMError, Register, SupportMachine, Syscalls};
 use std::cell::RefCell;
+use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct Pause<'a> {
-    skip: &'a RefCell<bool>,
+pub struct Pause {
+    skip: Arc<RefCell<bool>>,
 }
 
-impl<'a> Pause<'a> {
-    pub fn new(skip: &'a RefCell<bool>) -> Self {
+impl Pause {
+    pub fn new(skip: Arc<RefCell<bool>>) -> Self {
         Self { skip }
     }
 }
 
-impl<'a, Mac: SupportMachine> Syscalls<Mac> for Pause<'a> {
+impl<Mac: SupportMachine> Syscalls<Mac> for Pause {
     fn initialize(&mut self, _machine: &mut Mac) -> Result<(), VMError> {
         Ok(())
     }

@@ -146,9 +146,9 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.60.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -816,9 +816,7 @@ dependencies = [
 
 [[package]]
 name = "ckb-librocksdb-sys"
-version = "7.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d106bb32241da368e67ce9a36545e1cc3c31b7faa9321817199b69bf1e085b4a"
+version = "7.5.3"
 dependencies = [
  "bindgen",
  "cc",
@@ -1140,9 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "ckb-rocksdb"
-version = "0.18.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87b89828fd7e60e4d857f6f1a2f40343114eece1ca20859d4ca8371d4e00ce28"
+version = "0.19.0"
 dependencies = [
  "ckb-librocksdb-sys",
  "libc",
@@ -1224,6 +1220,7 @@ dependencies = [
  "faster-hex",
  "proptest",
  "rand 0.8.5",
+ "rayon",
  "serde",
  "tempfile",
  "tiny-keccak",
@@ -1507,8 +1504,7 @@ dependencies = [
 [[package]]
 name = "ckb-vm"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f1126bf0240d100234bc06efa7020f0d50ca35fe90e5ac7cac1b7721e1bacb7"
+source = "git+https://github.com/nervosnetwork/ckb-vm?rev=5c464b31e60eb281380a885b2b1a1311360572bc#5c464b31e60eb281380a885b2b1a1311360572bc"
 dependencies = [
  "byteorder",
  "bytes 1.2.1",
@@ -1525,8 +1521,7 @@ dependencies = [
 [[package]]
 name = "ckb-vm-definitions"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14739bf59648c169de9257ec7dd6aba1aeb6a41725d636005f1c91853df58fcc"
+source = "git+https://github.com/nervosnetwork/ckb-vm?rev=5c464b31e60eb281380a885b2b1a1311360572bc#5c464b31e60eb281380a885b2b1a1311360572bc"
 
 [[package]]
 name = "clang-sys"

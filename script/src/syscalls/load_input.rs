@@ -14,15 +14,16 @@ use ckb_vm::{
     registers::{A0, A3, A4, A5, A7},
     Error as VMError, Register, SupportMachine, Syscalls,
 };
+use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct LoadInput<'a> {
+pub struct LoadInput {
     inputs: CellInputVec,
-    group_inputs: &'a [usize],
+    group_inputs: Arc<Vec<usize>>,
 }
 
-impl<'a> LoadInput<'a> {
-    pub fn new(inputs: CellInputVec, group_inputs: &'a [usize]) -> LoadInput<'a> {
+impl LoadInput {
+    pub fn new(inputs: CellInputVec, group_inputs: Arc<Vec<usize>>) -> LoadInput {
         LoadInput {
             inputs,
             group_inputs,
@@ -80,7 +81,7 @@ impl<'a> LoadInput<'a> {
     }
 }
 
-impl<'a, Mac: SupportMachine> Syscalls<Mac> for LoadInput<'a> {
+impl<Mac: SupportMachine> Syscalls<Mac> for LoadInput {
     fn initialize(&mut self, _machine: &mut Mac) -> Result<(), VMError> {
         Ok(())
     }
