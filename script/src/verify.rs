@@ -96,14 +96,14 @@ impl LazyData {
 
 #[derive(Debug, Clone)]
 enum Binaries {
-    Unique(Byte32, Arc<LazyData>),
-    Duplicate(Byte32, Arc<LazyData>),
+    Unique(Byte32, LazyData),
+    Duplicate(Byte32, LazyData),
     Multiple,
 }
 
 impl Binaries {
     fn new(data_hash: Byte32, data: LazyData) -> Self {
-        Self::Unique(data_hash, Arc::new(data))
+        Self::Unique(data_hash, data)
     }
 
     fn merge(&mut self, data_hash: &Byte32) {
@@ -125,15 +125,15 @@ impl Binaries {
 /// FlatBufferBuilder owned `Vec<u8>` that grows as needed, in the
 /// future, we might refactor this to share buffer to achieve zero-copy
 pub struct TransactionScriptsVerifier<'a, DL> {
-    data_loader: Arc<Mutex<&'a DL>>,
+    data_loader: &'a DL,
 
-    debug_printer: Arc<dyn Fn(&Byte32, &str) + Sync + Send>,
+    debug_printer: Box<dyn Fn(&Byte32, &str) + Sync + Send>,
 
     outputs: Vec<CellMeta>,
     rtx: &'a ResolvedTransaction,
 
-    binaries_by_data_hash: HashMap<Byte32, Box<LazyData>>,
-    binaries_by_type_hash: HashMap<Byte32, Box<Binaries>>,
+    binaries_by_data_hash: HashMap<Byte32, LazyData>,
+    binaries_by_type_hash: HashMap<Byte32, Binaries>,
 
     lock_groups: BTreeMap<Byte32, ScriptGroup>,
     type_groups: BTreeMap<Byte32, ScriptGroup>,
@@ -151,7 +151,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
     /// * `data_loader` - used to load cell data.
     pub fn new(
         rtx: &'a ResolvedTransaction,
-        data_loader: Arc<Mutex<&'a DL>>,
+        data_loader: &'a DL,
     ) -> TransactionScriptsVerifier<'a, DL> {
         let tx_hash = rtx.transaction.hash();
         let resolved_cell_deps = &rtx.resolved_cell_deps;
@@ -177,24 +177,20 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
             })
             .collect();
 
-        let mut binaries_by_data_hash: HashMap<Byte32, Box<LazyData>> = HashMap::default();
-        let mut binaries_by_type_hash: HashMap<Byte32, Box<Binaries>> = HashMap::default();
+        let mut binaries_by_data_hash: HashMap<Byte32, LazyData> = HashMap::default();
+        let mut binaries_by_type_hash: HashMap<Byte32, Binaries> = HashMap::default();
         for cell_meta in resolved_cell_deps {
             let data_hash = data_loader
-                .lock()
-                .unwrap()
                 .load_cell_data_hash(cell_meta)
                 .expect("cell data hash");
             let lazy = LazyData::from_cell_meta(cell_meta);
-            binaries_by_data_hash.insert(data_hash.to_owned(), Box::new(lazy.to_owned()));
+            binaries_by_data_hash.insert(data_hash.to_owned(), lazy.to_owned());
 
             if let Some(t) = &cell_meta.cell_output.type_().to_opt() {
                 binaries_by_type_hash
                     .entry(t.calc_script_hash())
                     .and_modify(|bin| bin.merge(&data_hash))
-                    .or_insert_with(|| {
-                        Box::new(Binaries::new(data_hash.to_owned(), lazy.to_owned()))
-                    });
+                    .or_insert_with(|| Binaries::new(data_hash.to_owned(), lazy.to_owned()));
             }
         }
 
@@ -232,7 +228,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
             rtx,
             lock_groups,
             type_groups,
-            debug_printer: Arc::new(
+            debug_printer: Box::new(
                 #[allow(unused_variables)]
                 |hash: &Byte32, message: &str| {
                     #[cfg(feature = "logging")]
@@ -254,7 +250,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
     /// * `hash: &Byte32`: this is the script hash of currently running script group.
     /// * `message: &str`: message passed to the debug syscall.
     pub fn set_debug_printer<F: Fn(&Byte32, &str) + 'static + Sync + Send>(&mut self, func: F) {
-        self.debug_printer = Arc::new(func);
+        self.debug_printer = Box::new(func);
     }
 
     #[cfg(test)]
@@ -304,7 +300,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
 
     fn build_exec(&'a self, group_inputs: &'a [usize], group_outputs: &'a [usize]) -> Exec<'a, DL> {
         Exec::new(
-            &self.data_loader.lock().unwrap(),
+            self.data_loader,
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -324,7 +320,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
         group_outputs: &'a [usize],
     ) -> LoadCell<'a, DL> {
         LoadCell::new(
-            &self.data_loader.lock().unwrap(),
+            self.data_loader,
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -339,7 +335,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
         group_outputs: &'a [usize],
     ) -> LoadCellData<'a, DL> {
         LoadCellData::new(
-            &self.data_loader.lock().unwrap(),
+            self.data_loader,
             &self.outputs,
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -358,7 +354,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
 
     fn build_load_header(&'a self, group_inputs: &'a [usize]) -> LoadHeader<'a, DL> {
         LoadHeader::new(
-            &self.data_loader.lock().unwrap(),
+            self.data_loader,
             self.header_deps(),
             self.resolved_inputs(),
             self.resolved_cell_deps(),
@@ -385,20 +381,16 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
         match script_hash_type {
             ScriptHashType::Data | ScriptHashType::Data1 => {
                 if let Some(lazy) = self.binaries_by_data_hash.get(&script.code_hash()) {
-                    Ok(lazy.access(*self.data_loader.lock().unwrap()))
+                    Ok(lazy.access(self.data_loader))
                 } else {
                     Err(ScriptError::InvalidCodeHash)
                 }
             }
             ScriptHashType::Type => {
                 if let Some(bin) = self.binaries_by_type_hash.get(&script.code_hash()) {
-                    match **bin {
-                        Binaries::Unique(_, ref lazy) => {
-                            Ok(lazy.access(*self.data_loader.lock().unwrap()))
-                        }
-                        Binaries::Duplicate(_, ref lazy) => {
-                            Ok(lazy.access(*self.data_loader.lock().unwrap()))
-                        }
+                    match bin {
+                        Binaries::Unique(_, ref lazy) => Ok(lazy.access(self.data_loader)),
+                        Binaries::Duplicate(_, ref lazy) => Ok(lazy.access(self.data_loader)),
                         Binaries::Multiple => Err(ScriptError::MultipleMatches),
                     }
                 } else {
@@ -433,7 +425,6 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> TransactionScriptsVerifie
         let mut groups_used_cycles = Mutex::new(0 as Cycle);
         {
             match self.groups().par_bridge().try_for_each(|(hash, group)| {
-                info!("debug, verify each group");
                 return match self.verify_script_group(group, max_cycles).map_err(|e| {
                     #[cfg(feature = "logging")]
                     info!(

@@ -298,10 +298,7 @@ impl<'a, DL: CellDataProvider + HeaderProvider + Sync> ScriptVerifier<'a, DL> {
     /// Creates a new ScriptVerifier
     pub fn new(resolved_transaction: &'a ResolvedTransaction, data_loader: &'a DL) -> Self {
         ScriptVerifier {
-            inner: TransactionScriptsVerifier::new(
-                resolved_transaction,
-                Arc::new(Mutex::new(data_loader)),
-            ),
+            inner: TransactionScriptsVerifier::new(resolved_transaction, data_loader),
         }
     }
 
