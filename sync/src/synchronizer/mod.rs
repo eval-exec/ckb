@@ -11,17 +11,18 @@ pub(crate) use self::get_blocks_process::GetBlocksProcess;
 pub(crate) use self::get_headers_process::GetHeadersProcess;
 pub(crate) use self::headers_process::HeadersProcess;
 pub(crate) use self::in_ibd_process::InIBDProcess;
-
 use crate::block_status::BlockStatus;
 use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
 use crate::utils::send_message_to;
 use crate::{Status, StatusCode};
+use crossbeam::queue::ArrayQueue;
 
 use ckb_chain::chain::ChainController;
 use ckb_channel as channel;
+use ckb_channel::oneshot;
 use ckb_constant::sync::{
-    BAD_MESSAGE_BAN_TIME, CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME,
-    INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
+    BAD_MESSAGE_BAN_TIME, BLOCK_DOWNLOAD_WINDOW, CHAIN_SYNC_TIMEOUT,
+    EVICTION_HEADERS_RESPONSE_TIME, INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
 };
 use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
@@ -30,15 +31,18 @@ use ckb_network::{
     async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerIndex,
     ServiceControl, SupportProtocols,
 };
+use ckb_types::core::BlockView;
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
     prelude::*,
 };
+use ckb_util::Mutex;
 use faketime::unix_time_as_millis;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -208,6 +212,12 @@ pub struct Synchronizer {
     /// Sync shared state
     pub shared: Arc<SyncShared>,
     fetch_channel: Option<channel::Sender<FetchCMD>>,
+
+    /// Only in IBD mode, downloaded blocks will be pushed to block_queue
+    /// The block_queue will be consumed by ProcessBlock thread
+    /// block_queue will be dropped when IBD finished by send a () to drop_block_queue
+    block_queue: Arc<Mutex<Option<ArrayQueue<BlockView>>>>,
+    drop_block_queue: oneshot::Sender<()>,
 }
 
 impl Synchronizer {
@@ -215,11 +225,41 @@ impl Synchronizer {
     ///
     /// This is a runtime sync protocol shared state, and any relay messages will be processed and forwarded by it
     pub fn new(chain: ChainController, shared: Arc<SyncShared>) -> Synchronizer {
-        Synchronizer {
+        let block_queue = Arc::new(Mutex::new(Some(ArrayQueue::new(
+            (BLOCK_DOWNLOAD_WINDOW / 2) as usize,
+        ))));
+        let block_queue_clone = block_queue.clone();
+        let (stop_sender, stop_recv) = oneshot::channel::<()>();
+
+        let sync = Synchronizer {
             chain,
             shared,
             fetch_channel: None,
-        }
+            block_queue,
+            drop_block_queue: stop_sender,
+        };
+
+        let sync_clone = sync.clone();
+        thread::Builder::new()
+            .name("ProcessBlock".to_string())
+            .spawn(move || loop {
+                while let Some(block) = (*block_queue_clone.lock()).as_ref().unwrap().pop() {
+                    if let Err(err) = sync_clone.process_new_block(block) {
+                        if !crate::utils::is_internal_db_error(&err) {
+                            error!("BlockAcceptCMD process_new_block error: {}", err);
+                        }
+                    }
+                }
+
+                // stop ProcessBlock thread when stop_recv receive a message
+                if stop_recv.try_recv().is_ok() {
+                    *block_queue_clone.lock() = None;
+                    return;
+                }
+            })
+            .expect("accept block thread can't start");
+
+        sync
     }
 
     /// Get shared state
@@ -228,7 +268,7 @@ impl Synchronizer {
     }
 
     fn try_process<'r>(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,
@@ -244,8 +284,31 @@ impl Synchronizer {
                 GetBlocksProcess::new(reader, self, peer, nc).execute()
             }
             packed::SyncMessageUnionReader::SendBlock(reader) => {
+                // not in IBD mode
+                if !self.shared.shared().is_initial_block_download() {
+                    return BlockProcess::new(reader, self, peer).execute();
+                }
+
+                // in IBD mode
                 if reader.check_data() {
-                    BlockProcess::new(reader, self, peer).execute()
+                    let mut block = reader.block().to_entity().into_view();
+
+                    match (*self.block_queue.lock()).as_ref() {
+                        Some(queue) => {
+                            if self.shared().state().new_block_received(&block) {
+                                loop {
+                                    if let Err(not_pushed_block) = queue.push(block) {
+                                        block = not_pushed_block;
+                                        thread::sleep(Duration::from_millis(100));
+                                        continue;
+                                    }
+                                    break;
+                                }
+                            }
+                            Status::ok()
+                        }
+                        None => BlockProcess::new(reader, self, peer).execute(),
+                    }
                 } else {
                     StatusCode::ProtocolMessageIsMalformed.with_context("SendBlock is invalid")
                 }
@@ -256,7 +319,7 @@ impl Synchronizer {
     }
 
     fn process<'r>(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,
@@ -581,13 +644,13 @@ impl Synchronizer {
                 }
                 None => {
                     let p2p_control = raw.clone();
-                    let sync = self.clone();
                     let (sender, recv) = channel::bounded(2);
                     let peers = self.get_peers_to_fetch(ibd, &disconnect_list);
                     sender.send(FetchCMD::Fetch((peers, ibd))).unwrap();
                     self.fetch_channel = Some(sender);
                     let thread = ::std::thread::Builder::new();
                     let number = self.shared.state().shared_best_header_ref().number();
+                    let sync = self.clone();
                     thread
                         .name("BlockDownload".to_string())
                         .spawn(move || {
@@ -772,6 +835,8 @@ impl CKBProtocolHandler for Synchronizer {
                         if nc.remove_notify(IBD_BLOCK_FETCH_TOKEN).await.is_err() {
                             trace!("remove ibd block fetch fail");
                         }
+                        // stop block queue process
+                        let _ = self.drop_block_queue.send(());
                     }
                 }
                 NOT_IBD_BLOCK_FETCH_TOKEN => {
