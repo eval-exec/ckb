@@ -13,7 +13,7 @@ pub(crate) use self::headers_process::HeadersProcess;
 pub(crate) use self::in_ibd_process::InIBDProcess;
 use crate::block_status::BlockStatus;
 use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
-use crate::utils::send_message_to;
+use crate::utils::{is_internal_db_error, send_message_to};
 use crate::{Status, StatusCode};
 use crossbeam::queue::ArrayQueue;
 
@@ -37,8 +37,8 @@ use ckb_types::{
     packed::{self, Byte32},
     prelude::*,
 };
-use ckb_util::Mutex;
 use faketime::unix_time_as_millis;
+use once_cell::sync::OnceCell;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -216,7 +216,7 @@ pub struct Synchronizer {
     /// Only in IBD mode, downloaded blocks will be pushed to block_queue
     /// The block_queue will be consumed by ProcessBlock thread
     /// block_queue will be dropped when IBD finished by send a () to drop_block_queue
-    block_queue: Arc<Mutex<Option<ArrayQueue<BlockView>>>>,
+    block_queue: Arc<OnceCell<ArrayQueue<BlockView>>>,
     drop_block_queue: oneshot::Sender<()>,
 }
 
@@ -225,9 +225,9 @@ impl Synchronizer {
     ///
     /// This is a runtime sync protocol shared state, and any relay messages will be processed and forwarded by it
     pub fn new(chain: ChainController, shared: Arc<SyncShared>) -> Synchronizer {
-        let block_queue = Arc::new(Mutex::new(Some(ArrayQueue::new(
-            (BLOCK_DOWNLOAD_WINDOW) as usize,
-        ))));
+        let block_queue = Arc::new(OnceCell::new());
+        let _ =
+            block_queue.get_or_init(|| ArrayQueue::new(BLOCK_DOWNLOAD_WINDOW as usize * 2_usize));
         let block_queue_clone = block_queue.clone();
         let (stop_sender, stop_recv) = oneshot::channel::<()>();
 
@@ -243,7 +243,7 @@ impl Synchronizer {
         thread::Builder::new()
             .name("ProcessBlock".to_string())
             .spawn(move || loop {
-                while let Some(block) = block_queue_clone.lock().as_ref().unwrap().pop() {
+                while let Some(block) = block_queue_clone.get().unwrap().pop() {
                     if let Err(err) = sync_clone.process_new_block(block) {
                         if !crate::utils::is_internal_db_error(&err) {
                             error!("BlockAcceptCMD process_new_block error: {}", err);
@@ -254,9 +254,12 @@ impl Synchronizer {
                 // stop ProcessBlock thread when stop_recv receive a message
                 if stop_recv.try_recv().is_ok() {
                     // set Option<ArrayQueue> to None to drop block_queue
-                    let _ = block_queue_clone.lock().take();
+                    info!("block queue is dropped");
+                    let _ = block_queue_clone.get().take();
                     return;
                 }
+
+                thread::sleep(Duration::from_millis(50));
             })
             .expect("accept block thread can't start");
 
@@ -294,13 +297,18 @@ impl Synchronizer {
                 if reader.check_data() {
                     let block = reader.block().to_entity().into_view();
 
-                    match (*self.block_queue.lock()).as_ref() {
+                    match self.block_queue.get() {
                         Some(queue) => {
                             if self.shared().state().new_block_received(&block) {
-                                if let Err(_not_pushed_block) = queue.push(block) {
+                                if let Err(not_pushed_block) = queue.push(block) {
                                     // block_queue is full, so Process the block now
                                     // This rarely happens
-                                    BlockProcess::new(reader, self, peer).execute();
+                                    let hash = not_pushed_block.hash();
+                                    if let Err(err) = self.process_new_block(not_pushed_block) {
+                                        if !is_internal_db_error(&err) {
+                                            error!("block {} is invalid: {}", hash, err);
+                                        }
+                                    }
                                 }
                             }
                             Status::ok()
@@ -835,7 +843,14 @@ impl CKBProtocolHandler for Synchronizer {
                             trace!("remove ibd block fetch fail");
                         }
                         // stop block queue process
-                        let _ = self.drop_block_queue.send(());
+                        if let Err(err) = self.drop_block_queue.try_send(()) {
+                            // if we got err, it means channel is full, and the block queue will be dropped.
+                            // this cannot happen, because we have removed the IBD_BLOCK_FETCH_TOKEN notify token.
+                            error!(
+                                "send message to drop_block_queue fail: {}, this shouldn't happen",
+                                err
+                            );
+                        }
                     }
                 }
                 NOT_IBD_BLOCK_FETCH_TOKEN => {
