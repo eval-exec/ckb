@@ -32,6 +32,7 @@ use ckb_network::{
     ServiceControl, SupportProtocols,
 };
 use ckb_types::core::BlockView;
+use ckb_types::molecule::Number;
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
@@ -205,6 +206,14 @@ impl BlockFetchCMD {
     }
 }
 
+/// SendBlock msg related info
+struct SendBlockMsgInfo {
+    peer: PeerIndex,
+    item_name: String,
+    item_bytes_length: u64,
+    item_id: Number,
+}
+
 /// Sync protocol handle
 #[derive(Clone)]
 pub struct Synchronizer {
@@ -213,10 +222,11 @@ pub struct Synchronizer {
     pub shared: Arc<SyncShared>,
     fetch_channel: Option<channel::Sender<FetchCMD>>,
 
+    nc: Option<Arc<dyn CKBProtocolContext + Sync>>,
     /// Only in IBD mode, downloaded blocks will be pushed to block_queue
     /// The block_queue will be consumed by ProcessBlock thread
     /// block_queue will be dropped when IBD finished by send a () to drop_block_queue
-    block_queue: Arc<OnceCell<ArrayQueue<BlockView>>>,
+    block_queue: Arc<OnceCell<ArrayQueue<(BlockView, SendBlockMsgInfo)>>>,
     drop_block_queue: oneshot::Sender<()>,
 }
 
@@ -235,6 +245,7 @@ impl Synchronizer {
             chain,
             shared,
             fetch_channel: None,
+            nc: None,
             block_queue,
             drop_block_queue: stop_sender,
         };
@@ -243,10 +254,33 @@ impl Synchronizer {
         thread::Builder::new()
             .name("ProcessBlock".to_string())
             .spawn(move || loop {
-                while let Some(block) = block_queue_clone.get().unwrap().pop() {
+                while let Some((
+                    block,
+                    SendBlockMsgInfo {
+                        peer,
+                        item_name,
+                        item_bytes_length,
+                        item_id,
+                    },
+                )) = block_queue_clone.get().unwrap().pop()
+                {
+                    let hash = block.hash();
                     if let Err(err) = sync_clone.process_new_block(block) {
                         if !crate::utils::is_internal_db_error(&err) {
                             error!("BlockAcceptCMD process_new_block error: {}", err);
+
+                            let status = StatusCode::BlockIsInvalid
+                                .with_context(format!("{}, error: {}", hash, err,));
+                            if let Some(nc) = sync_clone.nc.clone() {
+                                Self::post_process(
+                                    nc,
+                                    peer,
+                                    &item_name,
+                                    item_bytes_length,
+                                    item_id,
+                                    status,
+                                )
+                            }
                         }
                     }
                 }
@@ -273,74 +307,101 @@ impl Synchronizer {
 
     fn try_process<'r>(
         &mut self,
-        nc: &dyn CKBProtocolContext,
+        nc: Arc<dyn CKBProtocolContext>,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,
-    ) -> Status {
+    ) -> Option<Status> {
         match message {
             packed::SyncMessageUnionReader::GetHeaders(reader) => {
-                GetHeadersProcess::new(reader, self, peer, nc).execute()
+                Some(GetHeadersProcess::new(reader, self, peer, nc.as_ref()).execute())
             }
             packed::SyncMessageUnionReader::SendHeaders(reader) => {
-                HeadersProcess::new(reader, self, peer, nc).execute()
+                Some(HeadersProcess::new(reader, self, peer, nc.as_ref()).execute())
             }
             packed::SyncMessageUnionReader::GetBlocks(reader) => {
-                GetBlocksProcess::new(reader, self, peer, nc).execute()
+                Some(GetBlocksProcess::new(reader, self, peer, nc.as_ref()).execute())
             }
             packed::SyncMessageUnionReader::SendBlock(reader) => {
-                // not in IBD mode
-                if !self.shared.shared().is_initial_block_download() {
-                    return BlockProcess::new(reader, self, peer).execute();
+                if !reader.check_data() {
+                    return Some(
+                        StatusCode::ProtocolMessageIsMalformed.with_context("SendBlock is invalid"),
+                    );
                 }
+                let block = reader.block().to_entity().into_view();
 
-                // in IBD mode
-                if reader.check_data() {
-                    let block = reader.block().to_entity().into_view();
+                match self.block_queue.get() {
+                    Some(queue) => {
+                        if self.shared().state().new_block_received(&block) {
+                            let item_name = message.item_name().to_string();
+                            let item_bytes_length = message.as_slice().len() as u64;
+                            let item_id = message.item_id();
 
-                    match self.block_queue.get() {
-                        Some(queue) => {
-                            if self.shared().state().new_block_received(&block) {
-                                if let Err(not_pushed_block) = queue.push(block) {
-                                    // block_queue is full, so Process the block now
-                                    // This rarely happens
-                                    let hash = not_pushed_block.hash();
-                                    if let Err(err) = self.process_new_block(not_pushed_block) {
-                                        if !is_internal_db_error(&err) {
-                                            error!("block {} is invalid: {}", hash, err);
-                                        }
+                            if let Err(not_pushed_block) = queue.push((
+                                block,
+                                SendBlockMsgInfo {
+                                    peer,
+                                    item_name,
+                                    item_bytes_length,
+                                    item_id,
+                                },
+                            )) {
+                                // block_queue is full, so Process the block now
+                                // This rarely happens
+                                let hash = not_pushed_block.0.hash();
+                                if let Err(err) = self.process_new_block(not_pushed_block.0) {
+                                    if !is_internal_db_error(&err) {
+                                        error!("block {} is invalid: {}", hash, err);
+                                        return Some(
+                                            StatusCode::BlockIsInvalid
+                                                .with_context(format!("{}, error: {}", hash, err,)),
+                                        );
                                     }
                                 }
                             }
-                            Status::ok()
                         }
-                        None => BlockProcess::new(reader, self, peer).execute(),
+                        None
                     }
-                } else {
-                    StatusCode::ProtocolMessageIsMalformed.with_context("SendBlock is invalid")
+                    None => Some(BlockProcess::new(reader, self, peer).execute()),
                 }
             }
-            packed::SyncMessageUnionReader::InIBD(_) => InIBDProcess::new(self, peer, nc).execute(),
-            _ => StatusCode::ProtocolMessageIsMalformed.with_context("unexpected sync message"),
+            packed::SyncMessageUnionReader::InIBD(_) => {
+                Some(InIBDProcess::new(self, peer, nc.as_ref()).execute())
+            }
+            _ => {
+                Some(StatusCode::ProtocolMessageIsMalformed.with_context("unexpected sync message"))
+            }
         }
     }
 
     fn process<'r>(
         &mut self,
-        nc: &dyn CKBProtocolContext,
+        nc: Arc<dyn CKBProtocolContext>,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'r>,
     ) {
         let item_name = message.item_name();
         let item_bytes = message.as_slice().len() as u64;
-        let status = self.try_process(nc, peer, message);
+        let item_id = message.item_id();
+        if let Some(status) = self.try_process(nc.clone(), peer, message) {
+            Self::post_process(nc, peer, item_name, item_bytes, item_id, status)
+        }
+    }
 
+    fn post_process(
+        nc: Arc<dyn CKBProtocolContext>,
+        peer: PeerIndex,
+        item_name: &str,
+        item_bytes_length: u64,
+        item_id: Number,
+        status: Status,
+    ) {
         metrics!(
             counter,
             "ckb.messages_bytes",
-            item_bytes,
+            item_bytes_length,
             "direction" => "in",
             "protocol_id" => SupportProtocols::Sync.protocol_id().value().to_string(),
-            "item_id" => message.item_id().to_string(),
+            "item_id" =>  item_id.to_string(),
             "status" => (status.code() as u16).to_string(),
         );
 
@@ -703,6 +764,9 @@ impl Synchronizer {
 #[async_trait]
 impl CKBProtocolHandler for Synchronizer {
     async fn init(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>) {
+        if self.nc.is_none() {
+            self.nc = Some(nc.clone());
+        }
         // NOTE: 100ms is what bitcoin use.
         nc.set_notify(SYNC_NOTIFY_INTERVAL, SEND_GET_HEADERS_TOKEN)
             .await
@@ -794,7 +858,7 @@ impl CKBProtocolHandler for Synchronizer {
         }
 
         let start_time = Instant::now();
-        tokio::task::block_in_place(|| self.process(nc.as_ref(), peer_index, msg));
+        tokio::task::block_in_place(|| self.process(nc, peer_index, msg));
         debug!(
             "process message={}, peer={}, cost={:?}",
             msg.item_name(),
