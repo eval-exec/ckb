@@ -648,18 +648,23 @@ impl CKBProtocolHandler for Synchronizer {
             let db = RocksDB::open_in(db_base_dir, COLUMNS);
             let store = ChainDB::new(db, Default::default());
 
+            let headers_chunk_start: u64 = std::env::var("HEADERS_CHUNK_START")
+                .unwrap_or("0".to_string())
+                .parse()
+                .unwrap();
+
             let headers_chunk_count: u64 = std::env::var("HEADERS_CHUNK_COUNT")
                 .unwrap_or("4000".to_string())
                 .parse()
                 .unwrap();
 
             let mut headers = Vec::with_capacity(headers_chunk_count as usize);
-            let blocks_count = headers_chunk_count * 2000;
+            let blocks_count = (headers_chunk_start + headers_chunk_count) * 2000;
             let mut blocks = Vec::with_capacity(blocks_count as usize);
 
             info!("debug, prepare headers and body queue");
             let mut header_vec: Vec<Header> = Vec::new();
-            for height in 1..=blocks_count {
+            for height in (headers_chunk_start * 2000 + 1)..=blocks_count {
                 let block_numebr: BlockNumber = height as u64;
                 let block_hash = store.get_block_hash(block_numebr).unwrap();
                 let header = store.get_packed_block_header(&block_hash).unwrap();
