@@ -29,20 +29,19 @@ use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
 use ckb_metrics::metrics;
 use ckb_network::{
-    async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerId, PeerIndex,
+    async_trait, bytes::Bytes, CKBProtocolContext, CKBProtocolHandler, PeerId, PeerIndex,
     ServiceControl, SupportProtocols,
 };
 use ckb_store::{ChainDB, ChainStore};
-use ckb_types::packed::{BlockReader, Header, HeaderVec, SendBlock};
+use ckb_types::packed::{Header, HeaderVec, SendBlock};
 use ckb_types::{
     core::{self, BlockNumber},
     packed::{self, Byte32},
     prelude::*,
 };
-use crossbeam_queue::ArrayQueue;
 use faketime::unix_time_as_millis;
 use iter_tools::Itertools;
-use std::rc::Rc;
+
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -642,18 +641,25 @@ impl Synchronizer {
 impl CKBProtocolHandler for Synchronizer {
     async fn init(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>) {
         {
-            let db = RocksDB::open_in(
-                "/home/exec/Projects/github.com/nervosnetwork/chain/sync-base/data/db",
-                COLUMNS,
-            );
+            let db_base_dir = std::env::var("DB_BASE_DIR").unwrap_or_else(|_| {
+                "/home/exec/Projects/github.com/nervosnetwork/chain/sync-base/data/db".to_string()
+            });
+
+            let db = RocksDB::open_in(db_base_dir, COLUMNS);
             let store = ChainDB::new(db, Default::default());
 
-            let mut headers = Vec::with_capacity(4_000);
-            let mut blocks = Vec::with_capacity(8_000_000);
+            let headers_chunk_count: u64 = std::env::var("HEADERS_CHUNK_COUNT")
+                .unwrap_or("4000".to_string())
+                .parse()
+                .unwrap();
+
+            let mut headers = Vec::with_capacity(headers_chunk_count as usize);
+            let blocks_count = headers_chunk_count * 2000;
+            let mut blocks = Vec::with_capacity(blocks_count as usize);
 
             info!("debug, prepare headers and body queue");
             let mut header_vec: Vec<Header> = Vec::new();
-            for height in 1..=8_000_000 {
+            for height in 1..=blocks_count {
                 let block_numebr: BlockNumber = height as u64;
                 let block_hash = store.get_block_hash(block_numebr).unwrap();
                 let header = store.get_packed_block_header(&block_hash).unwrap();
@@ -666,6 +672,11 @@ impl CKBProtocolHandler for Synchronizer {
                             .build(),
                     );
                     header_vec.clear();
+                    info!(
+                        "debug, prepare headers and blocks {}/{}",
+                        blocks.len(),
+                        blocks_count
+                    );
                 }
 
                 let block = store.get_packed_block(&block_hash).unwrap();

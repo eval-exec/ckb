@@ -162,7 +162,7 @@ impl CKBProtocolHandler for BlockFilter {
         peer_index: PeerIndex,
         _version: &str,
     ) {
-        info_target!(
+        debug_target!(
             crate::LOG_TARGET_FILTER,
             "FilterProtocol.connected peer={}",
             peer_index
@@ -174,7 +174,7 @@ impl CKBProtocolHandler for BlockFilter {
         _nc: Arc<dyn CKBProtocolContext + Sync>,
         peer_index: PeerIndex,
     ) {
-        info_target!(
+        debug_target!(
             crate::LOG_TARGET_FILTER,
             "FilterProtocol.disconnected peer={}",
             peer_index
