@@ -13,7 +13,6 @@ use crate::{
         TransactionSnapshot, TransactionState, VerifyResult,
     },
 };
-use std::cell::RefCell;
 
 use ckb_chain_spec::consensus::TYPE_ID_CODE_HASH;
 use ckb_error::Error;
@@ -139,7 +138,7 @@ pub struct TransactionScriptsVerifier<DL> {
     type_groups: BTreeMap<Byte32, ScriptGroup>,
 
     #[cfg(test)]
-    skip_pause: Arc<RefCell<bool>>,
+    skip_pause: Arc<Mutex<bool>>,
 }
 
 impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
@@ -236,7 +235,7 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
                 },
             ),
             #[cfg(test)]
-            skip_pause: Arc::new(RefCell::new(false)),
+            skip_pause: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -255,7 +254,7 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
 
     #[cfg(test)]
     pub(crate) fn set_skip_pause(&mut self, skip_pause: bool) {
-        *self.skip_pause.borrow_mut() = skip_pause;
+        *self.skip_pause.lock().unwrap() = skip_pause;
     }
 
     #[inline]
@@ -410,11 +409,13 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
     /// It returns the total consumed cycles on success, Otherwise it returns the verification error.
     pub fn verify(&self, max_cycles: Cycle) -> Result<Cycle, Error> {
         let all_used_cycles = AtomicU64::new(0);
+        let script_length = AtomicU64::new(0);
         let result = self
             .groups()
             .into_iter()
             .par_bridge()
             .try_for_each(|(hash, group)| {
+                script_length.fetch_add(1, Ordering::SeqCst);
                 let now = Instant::now();
                 self.verify_script_group(group, max_cycles)
                     .map(|used_cycle| {
@@ -432,6 +433,11 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
                         err.source(group)
                     })
             });
+        println!(
+            "verified {} script groups in a tx",
+            script_length.load(Ordering::SeqCst)
+        );
+
         if let Err(err) = result {
             return Err(err.into());
         }

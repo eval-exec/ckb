@@ -72,12 +72,14 @@ fn rayon_nest_verify() {
 }
 
 fn gen_rtx() -> ResolvedTransaction {
+    let num_script = 40;
+
     let (privkey, pubkey) = random_keypair();
 
     let mut cells = Vec::new();
     let mut dep_cells = Vec::new();
     let mut cell_deps = Vec::new();
-    (0..=5).for_each(|i| {
+    (0..num_script).for_each(|i| {
         let mut file = open_file(i);
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).unwrap();
@@ -130,6 +132,7 @@ fn gen_rtx() -> ResolvedTransaction {
         resolved_inputs: cells,
         resolved_dep_groups: vec![],
     };
+    rtx
 }
 
 #[test]
@@ -1274,7 +1277,7 @@ fn _check_typical_secp256k1_blake160_2_in_2_out_resume_load_cycles(step_cycles: 
     let verifier = TransactionScriptsVerifierWithEnv::new();
 
     let result = verifier.verify_map(script_version, &rtx, |verifier| {
-        let mut init_state: Option<TransactionState<'_>> = None;
+        let mut init_state: Option<TransactionState> = None;
 
         if let VerifyResult::Suspended(state) = verifier.resumable_verify(step_cycles).unwrap() {
             init_state = Some(state);

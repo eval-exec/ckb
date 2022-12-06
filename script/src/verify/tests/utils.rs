@@ -3,6 +3,7 @@ use ckb_crypto::secp::{Generator, Privkey, Pubkey, Signature};
 use ckb_db::RocksDB;
 use ckb_db_schema::COLUMNS;
 use ckb_hash::{blake2b_256, new_blake2b};
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::{data_loader_wrapper::DataLoaderWrapper, ChainDB};
 use ckb_test_chain_utils::{
     ckb_testnet_consensus, secp256k1_blake160_sighash_cell, secp256k1_data_cell,
@@ -43,7 +44,7 @@ pub(crate) fn open_cell_always_success() -> File {
 }
 
 pub(crate) fn open_file(i: i32) -> File {
-    open_cell_file(format!("testdata/always_success.{}", i).as_str())
+    open_cell_file(format!("../test-rayon-nest/build/always_success.{}", i).as_str())
 }
 
 pub(crate) fn open_cell_always_failure() -> File {
@@ -139,8 +140,25 @@ impl TransactionScriptsVerifierWithEnv {
         version: ScriptVersion,
         rtxs: Vec<ResolvedTransaction>,
     ) -> Result<Cycle, Error> {
-        rtxs.par_iter()
-            .for_each(|rtx| self.verify(version, &rtx, u64::MAX))
+        let all_used_cycles = AtomicU64::new(0);
+        println!(
+            "there are {} transactions for parallel verification",
+            rtxs.len()
+        );
+        if let Err(err) = rtxs.par_iter().try_for_each(|rtx| {
+            println!("verifying scirpt in transaction");
+            match self.verify(version, &rtx, u64::MAX) {
+                Ok(cycle) => {
+                    all_used_cycles.fetch_add(cycle, Ordering::SeqCst);
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            }
+        }) {
+            Err(err)
+        } else {
+            Ok(all_used_cycles.load(Ordering::SeqCst))
+        }
     }
 
     pub(crate) fn verify_without_limit(
@@ -219,9 +237,8 @@ impl TransactionScriptsVerifierWithEnv {
     where
         F: FnMut(TransactionScriptsVerifier<DataLoaderWrapper<ChainDB>>) -> R,
     {
-        let data_loader = DataLoaderWrapper::new(&self.store);
-        let verifier =
-            TransactionScriptsVerifier::new(Arc::new(rtx.clone()), Arc::new(data_loader));
+        let data_loader = Arc::new(self.store.clone()).as_data_loader();
+        let verifier = TransactionScriptsVerifier::new(Arc::new(rtx.clone()), data_loader);
         verify_func(verifier)
     }
 }

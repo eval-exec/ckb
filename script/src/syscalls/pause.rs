@@ -1,15 +1,14 @@
 use crate::syscalls::DEBUG_PAUSE;
 use ckb_vm::{registers::A7, Error as VMError, Register, SupportMachine, Syscalls};
-use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub struct Pause {
-    skip: Arc<RefCell<bool>>,
+    skip: Arc<Mutex<bool>>,
 }
 
 impl Pause {
-    pub fn new(skip: Arc<RefCell<bool>>) -> Self {
+    pub fn new(skip: Arc<Mutex<bool>>) -> Self {
         Self { skip }
     }
 }
@@ -23,7 +22,8 @@ impl<Mac: SupportMachine> Syscalls<Mac> for Pause {
         if machine.registers()[A7].to_u64() != DEBUG_PAUSE {
             return Ok(false);
         }
-        if *self.skip.borrow() {
+
+        if *self.skip.lock().unwrap() {
             return Ok(true);
         }
         Err(VMError::CyclesExceeded)

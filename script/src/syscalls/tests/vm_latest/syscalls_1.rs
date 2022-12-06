@@ -1,5 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use ckb_hash::blake2b_256;
+use ckb_types::core::cell::ResolvedTransaction;
+use ckb_types::core::TransactionView;
 use ckb_types::{
     bytes::Bytes,
     core::{
@@ -17,6 +19,7 @@ use ckb_vm::{
 };
 use proptest::{collection::size_range, prelude::*};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::SCRIPT_VERSION;
 use crate::syscalls::{tests::utils::*, *};
@@ -49,12 +52,16 @@ fn _test_load_cell_not_exist(data: &[u8]) -> Result<(), TestCaseError> {
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(load_cell.ecall(&mut machine).is_ok());
@@ -91,13 +98,18 @@ fn _test_load_cell_all(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     let input_correct_data = input_cell.cell_output.as_slice();
@@ -182,13 +194,18 @@ fn _test_load_cell_from_group(data: &[u8], source: SourceEntry) -> Result<(), Te
     let group_inputs = vec![0];
     let group_outputs = vec![0];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     let input_correct_data = input_cell.cell_output.as_slice();
@@ -270,13 +287,18 @@ fn _test_load_cell_out_of_bound(index: u64, source: u64) -> Result<(), TestCaseE
     let group_inputs = vec![0];
     let group_outputs = vec![0];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
     prop_assert!(load_cell.ecall(&mut machine).is_ok());
     prop_assert_eq!(machine.registers()[A0], u64::from(INDEX_OUT_OF_BOUND));
@@ -328,13 +350,18 @@ fn _test_load_cell_length(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     let input_correct_data = input_cell.cell_output.as_slice();
@@ -381,13 +408,18 @@ fn _test_load_cell_partial(data: &[u8], offset: u64) -> Result<(), TestCaseError
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     let input_correct_data = input_cell.cell_output.as_slice();
@@ -448,12 +480,16 @@ fn _test_load_cell_capacity(capacity: Capacity) -> Result<(), TestCaseError> {
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine.memory_mut().store64(&size_addr, &16).is_ok());
@@ -508,13 +544,18 @@ fn _test_load_cell_occupied_capacity(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine.memory_mut().store64(&size_addr, &16).is_ok());
@@ -571,12 +612,16 @@ fn test_load_missing_data_hash() {
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     assert!(machine.memory_mut().store64(&size_addr, &100).is_ok());
@@ -617,13 +662,18 @@ fn _test_load_missing_contract(field: CellField) {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     assert!(machine.memory_mut().store64(&size_addr, &100).is_ok());
@@ -685,11 +735,16 @@ fn _test_load_header(
     let resolved_cell_deps = vec![cell];
     let group_inputs = vec![0];
     let mut load_header = LoadHeader::new(
-        &data_loader,
-        header_deps.pack(),
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
+        data_loader,
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder()
+                .header_deps(header_deps)
+                .build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
     );
 
     prop_assert!(machine
@@ -798,11 +853,16 @@ fn _test_load_header_by_field(data: &[u8], field: HeaderField) -> Result<(), Tes
     let resolved_cell_deps = vec![];
     let group_inputs = vec![];
     let mut load_header = LoadHeader::new(
-        &data_loader,
-        header_deps.pack(),
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
+        data_loader,
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder()
+                .header_deps(header_deps)
+                .build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
     );
 
     prop_assert!(machine
@@ -846,7 +906,12 @@ fn _test_load_tx_hash(data: &[u8]) -> Result<(), TestCaseError> {
 
     let hash = transaction_view.hash();
     let hash_len = 32u64;
-    let mut load_tx = LoadTx::new(&transaction_view);
+    let mut load_tx = LoadTx::new(Arc::new(ResolvedTransaction {
+        transaction: transaction_view,
+        resolved_cell_deps: vec![],
+        resolved_inputs: vec![],
+        resolved_dep_groups: vec![],
+    }));
 
     prop_assert!(machine
         .memory_mut()
@@ -890,7 +955,12 @@ fn _test_load_tx(data: &[u8]) -> Result<(), TestCaseError> {
 
     let tx = transaction_view.data();
     let tx_len = transaction_view.data().as_slice().len() as u64;
-    let mut load_tx = LoadTx::new(&transaction_view);
+    let mut load_tx = LoadTx::new(Arc::new(ResolvedTransaction {
+        transaction: transaction_view,
+        resolved_cell_deps: vec![],
+        resolved_inputs: vec![],
+        resolved_dep_groups: vec![],
+    }));
 
     prop_assert!(machine
         .memory_mut()
@@ -1004,13 +1074,18 @@ fn _test_load_input_lock_script_hash(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine.memory_mut().store64(&size_addr, &64).is_ok());
@@ -1069,13 +1144,18 @@ fn _test_load_input_lock_script(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine
@@ -1137,13 +1217,18 @@ fn _test_load_input_type_script(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine
@@ -1207,13 +1292,18 @@ fn _test_load_input_type_script_hash(data: &[u8]) -> Result<(), TestCaseError> {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let data_loader = new_mock_data_loader();
+    let rtx = ResolvedTransaction {
+        transaction: TransactionView::new_advanced_builder().build(),
+        resolved_cell_deps,
+        resolved_inputs,
+        resolved_dep_groups: vec![],
+    };
     let mut load_cell = LoadCell::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(rtx),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine
@@ -1261,7 +1351,18 @@ fn _test_load_witness(data: &[u8], source: SourceEntry) -> Result<(), TestCaseEr
     let witnesses = vec![witness];
     let group_inputs = vec![];
     let group_outputs = vec![];
-    let mut load_witness = LoadWitness::new(witnesses.pack(), &group_inputs, &group_outputs);
+    let mut load_witness = LoadWitness::new(
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder()
+                .witnesses(witnesses)
+                .build(),
+            resolved_cell_deps: vec![],
+            resolved_inputs: vec![],
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
+    );
 
     prop_assert!(machine
         .memory_mut()
@@ -1317,7 +1418,18 @@ fn _test_load_group_witness(data: &[u8], source: SourceEntry) -> Result<(), Test
     let witnesses = vec![dummy_witness, witness];
     let group_inputs = vec![1];
     let group_outputs = vec![1];
-    let mut load_witness = LoadWitness::new(witnesses.pack(), &group_inputs, &group_outputs);
+    let mut load_witness = LoadWitness::new(
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder()
+                .witnesses(witnesses)
+                .build(),
+            resolved_cell_deps: vec![],
+            resolved_inputs: vec![],
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
+    );
 
     prop_assert!(machine
         .memory_mut()
@@ -1425,12 +1537,16 @@ fn _test_load_cell_data_as_code(
     let group_outputs = vec![0];
     let data_loader = new_mock_data_loader();
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps: resolved_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(machine.memory_mut().store_byte(addr, addr_size, 1).is_ok());
@@ -1493,12 +1609,16 @@ fn _test_load_cell_data(
     let data_loader = new_mock_data_loader();
 
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps: resolved_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
     prop_assert!(load_code.ecall(&mut machine).is_ok());
 
@@ -1593,12 +1713,16 @@ fn test_load_overflowed_cell_data_as_code() {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     assert!(machine.memory_mut().store_byte(addr, addr_size, 1).is_ok());
@@ -1640,12 +1764,16 @@ fn _test_load_cell_data_on_freezed_memory(as_code: bool, data: &[u8]) -> Result<
     let group_inputs = vec![];
     let group_outputs = vec![];
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     prop_assert!(load_code.ecall(&mut machine).is_err());
@@ -1695,14 +1823,17 @@ fn test_load_code_unaligned_error() {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
-
     assert!(machine.memory_mut().store_byte(addr, addr_size, 1).is_ok());
 
     assert!(load_code.ecall(&mut machine).is_err());
@@ -1737,12 +1868,16 @@ fn test_load_code_slice_out_of_bound_error() {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     assert!(machine.memory_mut().store_byte(addr, addr_size, 1).is_ok());
@@ -1782,12 +1917,16 @@ fn test_load_code_not_enough_space_error() {
     let group_inputs = vec![];
     let group_outputs = vec![];
     let mut load_code = LoadCellData::new(
-        &data_loader,
-        &outputs,
-        &resolved_inputs,
-        &resolved_cell_deps,
-        &group_inputs,
-        &group_outputs,
+        data_loader,
+        Arc::new(outputs),
+        Arc::new(ResolvedTransaction {
+            transaction: TransactionView::new_advanced_builder().build(),
+            resolved_cell_deps,
+            resolved_inputs,
+            resolved_dep_groups: vec![],
+        }),
+        Arc::new(group_inputs),
+        Arc::new(group_outputs),
     );
 
     assert!(machine.memory_mut().store_byte(addr, addr_size, 1).is_ok());
@@ -1844,7 +1983,7 @@ fn _test_load_input(
     let previous_output = input.previous_output();
 
     let group_inputs = vec![0];
-    let mut load_input = LoadInput::new(vec![input.clone()].pack(), &group_inputs);
+    let mut load_input = LoadInput::new(vec![input.clone()].pack(), Arc::new(group_inputs));
 
     let mut buffer = vec![];
     let expect = if let Some(field) = field {
