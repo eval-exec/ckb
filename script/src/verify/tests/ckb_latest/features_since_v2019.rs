@@ -55,71 +55,71 @@ fn check_always_success_hash() {
 #[test]
 fn check_signature() {
     let script_version = SCRIPT_VERSION;
-
-    let mut file = open_cell_always_success();
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).unwrap();
-
-    let (privkey, pubkey) = random_keypair();
-    let mut args = b"foobar".to_vec();
-
-    let signature = sign_args(&args, &privkey);
-    args.extend(&to_hex_pubkey(&pubkey));
-    args.extend(&to_hex_signature(&signature));
-
-    let code_hash = blake2b_256(&buffer);
-    let dep_out_point = OutPoint::new(h256!("0x123").pack(), 8);
-    let cell_dep = CellDep::new_builder()
-        .out_point(dep_out_point.clone())
-        .build();
-    let data = Bytes::from(buffer);
-    let output = CellOutputBuilder::default()
-        .capacity(Capacity::bytes(data.len()).unwrap().pack())
-        .build();
-    let dep_cell = CellMetaBuilder::from_cell_output(output, data)
-        .transaction_info(default_transaction_info())
-        .out_point(dep_out_point)
-        .build();
-
-    let script = Script::new_builder()
-        .args(Bytes::from(args).pack())
-        .code_hash(code_hash.pack())
-        .hash_type(ScriptHashType::Data.into())
-        .build();
-    let input = CellInput::new(OutPoint::null(), 0);
-
-    let transaction = TransactionBuilder::default()
-        .input(input)
-        .cell_dep(cell_dep)
-        .build();
-
-    let output = CellOutputBuilder::default()
-        .capacity(capacity_bytes!(100).pack())
-        .lock(script)
-        .build();
-    let dummy_cell = create_dummy_cell(output);
-
-    let rtx = ResolvedTransaction {
-        transaction,
-        resolved_cell_deps: vec![dep_cell],
-        resolved_inputs: vec![dummy_cell],
-        resolved_dep_groups: vec![],
-    };
-
+    let rtx = gen_rtx();
     let verifier = TransactionScriptsVerifierWithEnv::new();
     let result = verifier.verify_without_limit(script_version, &rtx);
     assert!(result.is_ok());
+}
 
-    // Not enough cycles
-    let max_cycles = ALWAYS_SUCCESS_SCRIPT_CYCLE - 1;
-    let result = verifier.verify(script_version, &rtx, max_cycles);
-    assert_error_eq!(
-        result.unwrap_err(),
-        ScriptError::ExceededMaximumCycles(max_cycles).input_lock_script(0),
-    );
+fn gen_rtx() -> ResolvedTransaction {
+    let (privkey, pubkey) = random_keypair();
 
-    let result = verifier.verify_without_limit(script_version, &rtx);
-    assert!(result.is_ok());
+    let mut cells = Vec::new();
+    let mut dep_cells = Vec::new();
+    let mut cell_deps = Vec::new();
+    (0..=5).for_each(|i| {
+        let mut file = open_file(i);
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+        let mut args = b"0".to_vec();
+        *args.get_mut(0).unwrap() = args.get(0).unwrap() + i as u8;
+
+        let signature = sign_args(&args, &privkey);
+        args.extend(&to_hex_pubkey(&pubkey));
+        args.extend(&to_hex_signature(&signature));
+
+        let code_hash = blake2b_256(&buffer);
+        let dep_out_point = OutPoint::new(h256!("0x123").pack(), 8);
+        let cell_dep = CellDep::new_builder()
+            .out_point(dep_out_point.clone())
+            .build();
+        cell_deps.push(cell_dep);
+        let data = Bytes::from(buffer);
+        let output = CellOutputBuilder::default()
+            .capacity(Capacity::bytes(data.len()).unwrap().pack())
+            .build();
+        let dep_cell = CellMetaBuilder::from_cell_output(output, data)
+            .transaction_info(default_transaction_info())
+            .out_point(dep_out_point)
+            .build();
+        dep_cells.push(dep_cell);
+
+        let script = Script::new_builder()
+            .args(Bytes::from(args).pack())
+            .code_hash(code_hash.pack())
+            .hash_type(ScriptHashType::Data.into())
+            .build();
+
+        let output = CellOutputBuilder::default()
+            .capacity(capacity_bytes!(100).pack())
+            .lock(script)
+            .build();
+        let dummy_cell: CellMeta = create_dummy_cell(output);
+        cells.push(dummy_cell);
+    });
+
+    let input = CellInput::new(OutPoint::null(), 0);
+    let transaction = TransactionBuilder::default()
+        .input(input)
+        .cell_deps(cell_deps)
+        .build();
+
+    let rtx = ResolvedTransaction {
+        transaction,
+        resolved_cell_deps: dep_cells,
+        resolved_inputs: cells,
+        resolved_dep_groups: vec![],
+    };
 }
 
 #[test]

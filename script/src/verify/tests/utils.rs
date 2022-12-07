@@ -42,6 +42,10 @@ pub(crate) fn open_cell_always_success() -> File {
     open_cell_file("testdata/always_success")
 }
 
+pub(crate) fn open_file(i: i32) -> File {
+    open_cell_file(format!("testdata/always_success.{}", i).as_str())
+}
+
 pub(crate) fn open_cell_always_failure() -> File {
     open_cell_file("testdata/always_failure")
 }

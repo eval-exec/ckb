@@ -13,7 +13,7 @@ use crate::{
         TransactionSnapshot, TransactionState, VerifyResult,
     },
 };
-use std::borrow::BorrowMut;
+use std::cell::RefCell;
 
 use ckb_chain_spec::consensus::TYPE_ID_CODE_HASH;
 use ckb_error::Error;
@@ -36,10 +36,10 @@ use ckb_vm::{
     DefaultMachineBuilder, Error as VMInternalError, SupportMachine, Syscalls,
 };
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[cfg(test)]
 mod tests;
@@ -415,9 +415,16 @@ impl<DL: 'static + CellDataProvider + HeaderProvider + Clone + Sync + Send>
             .into_iter()
             .par_bridge()
             .try_for_each(|(hash, group)| {
+                let now = Instant::now();
                 self.verify_script_group(group, max_cycles)
                     .map(|used_cycle| {
                         all_used_cycles.fetch_add(used_cycle.into(), Ordering::Acquire);
+                        println!(
+                            "{}, used:{}, elapsed: {:?}",
+                            hash,
+                            used_cycle,
+                            now.elapsed()
+                        );
                     })
                     .map_err(|err| {
                         #[cfg(feature = "logging")]

@@ -8,16 +8,19 @@ use ckb_network::{
     async_trait, bytes::Bytes, Behaviour, CKBProtocolContext, Peer, PeerId, PeerIndex, ProtocolId,
     SessionType, TargetSession,
 };
+
 use ckb_reward_calculator::RewardCalculator;
 use ckb_shared::{Shared, Snapshot};
 use ckb_store::ChainStore;
 use ckb_types::{
     core::{
-        cell::resolve_transaction, BlockBuilder, BlockNumber, BlockView, EpochExt, HeaderBuilder,
-        HeaderView as CoreHeaderView, TransactionBuilder, TransactionView,
+        capacity_bytes, cell::resolve_transaction, BlockBuilder, BlockNumber, BlockView, Capacity,
+        EpochExt, HeaderBuilder, HeaderView as CoreHeaderView, ScriptHashType, TransactionBuilder,
+        TransactionView,
     },
     packed::{
-        self, Byte32, CellInput, CellOutputBuilder, Script, SendBlockBuilder, SendHeadersBuilder,
+        self, Byte32, CellInput, CellOutput, CellOutputBuilder, OutPoint, Script, SendBlockBuilder,
+        SendHeadersBuilder,
     },
     prelude::*,
     utilities::difficulty_to_compact,
@@ -27,6 +30,9 @@ use ckb_util::Mutex;
 use ckb_verification_traits::Switch;
 use faketime::unix_time_as_millis;
 use futures::future::Future;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
@@ -86,6 +92,83 @@ fn create_cellbase(
             .output_data(Bytes::new().pack())
             .build()
     }
+}
+
+fn gen_complex_block(
+    shared: &Shared,
+    parent_header: &CoreHeaderView,
+    epoch: &EpochExt,
+    nonce: u128,
+) -> BlockView {
+    let now = 1 + parent_header.timestamp();
+    let number = parent_header.number() + 1;
+    let cellbase = create_cellbase(shared, parent_header, number);
+    let dao = {
+        let snapshot: &Snapshot = &shared.snapshot();
+        let resolved_cellbase =
+            resolve_transaction(cellbase.clone(), &mut HashSet::new(), snapshot, snapshot).unwrap();
+        let data_loader = shared.store().borrow_as_data_loader();
+        DaoCalculator::new(shared.consensus(), &data_loader)
+            .dao_field(&[resolved_cellbase], parent_header)
+            .unwrap()
+    };
+
+    let transactions: Vec<TransactionView> = (0..20)
+        .map(|i: i32| {
+            let data = Bytes::from(i.to_le_bytes().to_vec());
+
+            let num_scripts = 5;
+
+            TransactionBuilder::default()
+                .inputs(
+                    (0..num_scripts)
+                        .map(|i| CellInput::new(OutPoint::null(), 0))
+                        .collect(),
+                )
+                .outputs(
+                    (0..num_scripts)
+                        .map(|i| {
+                            CellOutput::new_builder()
+                                .capacity(capacity_bytes!(50_000).pack())
+                                .lock(load_always_success_script(i))
+                                .build()
+                        })
+                        .collect(),
+                )
+                .output_data(data.pack())
+                .build()
+        })
+        .collect();
+
+    BlockBuilder::default()
+        .transaction(cellbase)
+        .transactions(transactions)
+        .parent_hash(parent_header.hash())
+        .timestamp(now.pack())
+        .epoch(epoch.number_with_fraction(number).pack())
+        .number(number.pack())
+        .compact_target(epoch.compact_target().pack())
+        .nonce(nonce.pack())
+        .dao(dao)
+        .build()
+}
+fn load_always_success_script(i: i32) -> Script {
+    let p = format!("testdata/always_success.{}", i).as_str();
+
+    let mut file = File::open(Path::new(p)).unwrap();
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).unwrap();
+    let data: Bytes = buffer.into();
+
+    let cell = CellOutput::new_builder()
+        .capacity(Capacity::bytes(data.len()).unwrap().pack())
+        .build();
+
+    let script = Script::new_builder()
+        .hash_type(ScriptHashType::Data.into())
+        .code_hash(CellOutput::calc_data_hash(&data))
+        .build();
+    script
 }
 
 fn gen_block(
