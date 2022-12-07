@@ -61,6 +61,16 @@ fn check_signature() {
     assert!(result.is_ok());
 }
 
+#[test]
+fn rayon_nest_verify() {
+    let num_txs = 5;
+    let rtxs: Vec<ResolvedTransaction> = (0..num_txs).map(|tx_idx| gen_rtx()).collect();
+
+    let verifier = TransactionScriptsVerifierWithEnv::new();
+    let result = verifier.parallel_verify_without_limit(SCRIPT_VERSION, rtxs);
+    assert!(result.is_ok());
+}
+
 fn gen_rtx() -> ResolvedTransaction {
     let (privkey, pubkey) = random_keypair();
 

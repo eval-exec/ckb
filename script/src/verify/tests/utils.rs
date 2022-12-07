@@ -134,6 +134,15 @@ impl TransactionScriptsVerifierWithEnv {
         }
     }
 
+    pub(crate) fn parallel_verify_without_limit(
+        &self,
+        version: ScriptVersion,
+        rtxs: Vec<ResolvedTransaction>,
+    ) -> Result<Cycle, Error> {
+        rtxs.par_iter()
+            .for_each(|rtx| self.verify(version, &rtx, u64::MAX))
+    }
+
     pub(crate) fn verify_without_limit(
         &self,
         version: ScriptVersion,
@@ -208,7 +217,7 @@ impl TransactionScriptsVerifierWithEnv {
         mut verify_func: F,
     ) -> R
     where
-        F: FnMut(TransactionScriptsVerifier<'_, DataLoaderWrapper<'_, ChainDB>>) -> R,
+        F: FnMut(TransactionScriptsVerifier<DataLoaderWrapper<ChainDB>>) -> R,
     {
         let data_loader = DataLoaderWrapper::new(&self.store);
         let verifier =

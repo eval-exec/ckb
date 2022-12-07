@@ -9,9 +9,12 @@ use ckb_network::{
     SessionType, TargetSession,
 };
 
+use ckb_crypto::secp::{Generator, Privkey, Pubkey, Signature};
 use ckb_reward_calculator::RewardCalculator;
 use ckb_shared::{Shared, Snapshot};
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::ChainStore;
+use ckb_types::packed::BytesVec;
 use ckb_types::{
     core::{
         capacity_bytes, cell::resolve_transaction, BlockBuilder, BlockNumber, BlockView, Capacity,
@@ -113,29 +116,29 @@ fn gen_complex_block(
             .unwrap()
     };
 
-    let transactions: Vec<TransactionView> = (0..20)
-        .map(|i: i32| {
-            let data = Bytes::from(i.to_le_bytes().to_vec());
-
+    let transactions: Vec<TransactionView> = (0..1)
+        .map(|tx_idx: i32| {
             let num_scripts = 5;
 
             TransactionBuilder::default()
                 .inputs(
                     (0..num_scripts)
-                        .map(|i| CellInput::new(OutPoint::null(), 0))
-                        .collect(),
+                        .map(|_i| CellInput::new(OutPoint::null(), 0))
+                        .collect::<Vec<CellInput>>(),
                 )
                 .outputs(
                     (0..num_scripts)
-                        .map(|i| {
+                        .map(|script_idx| {
                             CellOutput::new_builder()
-                                .capacity(capacity_bytes!(50_000).pack())
-                                .lock(load_always_success_script(i))
+                                .capacity(capacity_bytes!(500_000).pack())
+                                .lock(load_always_success_script(script_idx))
                                 .build()
                         })
-                        .collect(),
+                        .collect::<Vec<CellOutput>>(),
                 )
-                .output_data(data.pack())
+                .outputs_data(
+                    (0..num_scripts).map(|i| Bytes::from(i.to_le_bytes().to_vec()).pack()),
+                )
                 .build()
         })
         .collect();
@@ -152,10 +155,12 @@ fn gen_complex_block(
         .dao(dao)
         .build()
 }
-fn load_always_success_script(i: i32) -> Script {
-    let p = format!("testdata/always_success.{}", i).as_str();
 
-    let mut file = File::open(Path::new(p)).unwrap();
+fn load_always_success_script(i: i32) -> Script {
+    let mut file = File::open(Path::new(
+        format!("../script/testdata/always_success.{}", i).as_str(),
+    ))
+    .unwrap();
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
     let data: Bytes = buffer.into();
@@ -184,7 +189,7 @@ fn gen_block(
         let snapshot: &Snapshot = &shared.snapshot();
         let resolved_cellbase =
             resolve_transaction(cellbase.clone(), &mut HashSet::new(), snapshot, snapshot).unwrap();
-        let data_loader = shared.store().as_data_provider();
+        let data_loader = shared.store().borrow_as_data_loader();
         DaoCalculator::new(shared.consensus(), &data_loader)
             .dao_field(&[resolved_cellbase], parent_header)
             .unwrap()
@@ -214,11 +219,11 @@ fn insert_block(
         .unwrap();
     let epoch = snapshot
         .consensus()
-        .next_epoch_ext(&parent, &snapshot.as_data_provider())
+        .next_epoch_ext(&parent, &snapshot.as_data_loader())
         .unwrap()
         .epoch();
 
-    let block = gen_block(shared, &parent, &epoch, nonce);
+    let block = gen_complex_block(shared, &parent, &epoch, nonce);
 
     chain_controller
         .process_block(Arc::new(block))
@@ -309,7 +314,7 @@ fn test_locate_latest_common_block2() {
         let store = shared1.store();
         let epoch = shared1
             .consensus()
-            .next_epoch_ext(&parent, &store.as_data_provider())
+            .next_epoch_ext(&parent, &store.borrow_as_data_loader())
             .unwrap()
             .epoch();
         let new_block = gen_block(&shared1, &parent, &epoch, i);
@@ -330,7 +335,7 @@ fn test_locate_latest_common_block2() {
         let store = shared2.store();
         let epoch = shared2
             .consensus()
-            .next_epoch_ext(&parent, &store.as_data_provider())
+            .next_epoch_ext(&parent, &store.borrow_as_data_loader())
             .unwrap()
             .epoch();
         let new_block = gen_block(&shared2, &parent, &epoch, i + 100);
@@ -417,7 +422,7 @@ fn test_process_new_block() {
         let store = shared1.store();
         let epoch = shared1
             .consensus()
-            .next_epoch_ext(&parent, &store.as_data_provider())
+            .next_epoch_ext(&parent, &store.borrow_as_data_loader())
             .unwrap()
             .epoch();
         let new_block = gen_block(&shared1, &parent, &epoch, i + 100);
@@ -453,7 +458,7 @@ fn test_get_locator_response() {
         let store = shared.snapshot();
         let epoch = shared
             .consensus()
-            .next_epoch_ext(&parent, &store.as_data_provider())
+            .next_epoch_ext(&parent, &store.as_data_loader())
             .unwrap()
             .epoch();
         let new_block = gen_block(&shared, &parent, &epoch, i + 100);

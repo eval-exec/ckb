@@ -4,6 +4,7 @@ use ckb_dao::DaoCalculator;
 use ckb_launcher::SharedBuilder;
 use ckb_reward_calculator::RewardCalculator;
 use ckb_shared::{Shared, Snapshot};
+use ckb_store::data_loader_wrapper::AsDataLoader;
 use ckb_store::ChainStore;
 use ckb_test_chain_utils::{always_success_cellbase, always_success_consensus};
 use ckb_types::prelude::*;
@@ -52,7 +53,7 @@ pub fn inherit_block(shared: &Shared, parent_hash: &Byte32) -> BlockBuilder {
     let parent_number = parent.header().number();
     let epoch = snapshot
         .consensus()
-        .next_epoch_ext(&parent.header(), &snapshot.as_data_provider())
+        .next_epoch_ext(&parent.header(), &snapshot.as_data_loader())
         .unwrap()
         .epoch();
     let cellbase = inherit_cellbase(&snapshot, parent_number);
@@ -64,7 +65,7 @@ pub fn inherit_block(shared: &Shared, parent_hash: &Byte32) -> BlockBuilder {
             snapshot.as_ref(),
         )
         .unwrap();
-        let data_loader = snapshot.as_data_provider();
+        let data_loader = snapshot.as_data_loader();
         DaoCalculator::new(shared.consensus(), &data_loader)
             .dao_field(&[resolved_cellbase], &parent.header())
             .unwrap()
