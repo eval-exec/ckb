@@ -15,9 +15,6 @@ use crate::block_status::BlockStatus;
 use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
 use crate::utils::send_message_to;
 use crate::{Status, StatusCode};
-
-use futures::prelude::*;
-
 use ckb_chain::chain::ChainController;
 use ckb_channel as channel;
 use ckb_constant::sync::{
@@ -38,10 +35,9 @@ use ckb_types::{
     packed::{self, Byte32},
     prelude::*,
 };
-
-use faketime::unix_time_as_millis;
-
 use crossbeam::sync::ShardedLock;
+use faketime::unix_time_as_millis;
+use futures::prelude::*;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -49,8 +45,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ckb_util::Mutex;
 use rtrb::{Producer, RingBuffer};
+use std::sync::Mutex;
 
 pub const SEND_GET_HEADERS_TOKEN: u64 = 0;
 pub const IBD_BLOCK_FETCH_TOKEN: u64 = 1;
@@ -228,13 +224,10 @@ pub struct Synchronizer {
     pub shared: Arc<SyncShared>,
     fetch_channel: Option<channel::Sender<FetchCMD>>,
 
-    /// Only in IBD mode, downloaded blocks will be pushed to block_queue
-    /// The block_queue will be consumed by ProcessBlock thread
-    /// If IBD finished, and block_queue will be dropped when the queue is  empty
-    rtrb_producer: Arc<Mutex<Producer<(BlockView, SendBlockMsgInfo)>>>,
-    // block_queue: ShardedOption<ArrayQueue<(BlockView, SendBlockMsgInfo)>>,
-    /// Only in IBD mode, if no blocks in queue, the consumer thread will park(),
-    /// and be notified by this thread handle
+    /// Only in IBD mode, downloaded blocks will be pushed to blocks ringbuffer
+    /// The ringbuffer will be consumed by ProcessBlock thread
+    /// If IBD finished, producer and consumer will be dropped
+    block_producer: Arc<Mutex<Option<Producer<(Arc<BlockView>, SendBlockMsgInfo)>>>>,
     block_queue_consumer_handle: ShardedOption<thread::JoinHandle<()>>,
     /// The channel Receiver is used for CKBProtocolHandler::poll()
     /// If we got process_new_block's status from this receiver, give the status to post_process()
@@ -248,7 +241,7 @@ impl Clone for Synchronizer {
             chain: self.chain.clone(),
             shared: Arc::clone(&self.shared),
             fetch_channel: self.fetch_channel.clone(),
-            rtrb_producer: self.rtrb_producer.clone(),
+            block_producer: Arc::clone(&self.block_producer),
             block_queue_consumer_handle: Arc::clone(&self.block_queue_consumer_handle),
 
             // we only need one Receiver for CKBProtocolHandler::poll
@@ -264,15 +257,15 @@ impl Synchronizer {
     pub fn new(chain: ChainController, shared: Arc<SyncShared>) -> Synchronizer {
         let (mut status_sender, status_recv) = futures::channel::mpsc::channel(512);
 
-        let (rtrb_producer, mut rtrb_consumer) =
-            RingBuffer::<(BlockView, SendBlockMsgInfo)>::new(512);
+        let (block_producer, mut block_consumer) =
+            RingBuffer::<(Arc<BlockView>, SendBlockMsgInfo)>::new(512);
 
         let mut sync = Synchronizer {
             chain,
             shared,
             fetch_channel: None,
 
-            rtrb_producer: Arc::new(Mutex::new(rtrb_producer)),
+            block_producer: Arc::new(Mutex::new(Some(block_producer))),
             block_queue_consumer_handle: Arc::new(ShardedLock::new(None)),
 
             // only main Synchronizer instance hold status_recv, the clone hold None
@@ -281,7 +274,7 @@ impl Synchronizer {
 
         let sync_clone = sync.clone();
 
-        // only create block queue and consumer thread in ibd mode
+        // only create blocks ringbuffer thread in ibd mode
         if sync_clone
             .shared()
             .active_chain()
@@ -290,54 +283,65 @@ impl Synchronizer {
             let thread_handle = thread::Builder::new()
                 .name("ProcessBlock".to_string())
                 .spawn(move || loop {
-                    let chunks = rtrb_consumer
-                        .read_chunk(rtrb_consumer.slots())
-                        .expect("expect to read all items from rtrb");
-                    chunks.into_iter().for_each(
-                        |(
-                            block,
-                            SendBlockMsgInfo {
-                                peer,
-                                item_name,
-                                item_bytes_length,
-                                item_id,
-                            },
-                        )| {
-                            debug!(
-                                "get block from block_queue, height: {}",
-                                block.number() as u64
-                            );
-                            let hash = block.hash();
-                            let mut status = Status::ok();
-                            if let Err(err) = sync_clone.process_new_block(block) {
-                                if !crate::utils::is_internal_db_error(&err) {
-                                    error!("BlockAcceptCMD process_new_block error: {}", err);
+                    let abandoned = block_consumer.is_abandoned();
+                    block_consumer
+                        .read_chunk(block_consumer.slots())
+                        .expect("read chunk from blocks ringbuffer")
+                        .into_iter()
+                        .for_each(
+                            |(
+                                block,
+                                SendBlockMsgInfo {
+                                    peer,
+                                    item_name,
+                                    item_bytes_length,
+                                    item_id,
+                                },
+                            )| {
+                                debug!(
+                                    "get block from block_queue, height: {}",
+                                    block.number() as u64
+                                );
+                                let hash = block.hash();
+                                let mut status = Status::ok();
+                                if let Err(err) = sync_clone.process_new_block(block) {
+                                    if !crate::utils::is_internal_db_error(&err) {
+                                        error!("BlockAcceptCMD process_new_block error: {}", err);
 
-                                    status = StatusCode::BlockIsInvalid
-                                        .with_context(format!("{}, error: {}", hash, err,));
+                                        status = StatusCode::BlockIsInvalid
+                                            .with_context(format!("{}, error: {}", hash, err,));
 
+                                        Self::metrics_block_process(
+                                            item_bytes_length,
+                                            item_id,
+                                            &status,
+                                        );
+
+                                        // Only report status when not ok
+                                        let _ = status_sender.try_send((
+                                            status,
+                                            SendBlockMsgInfo {
+                                                peer,
+                                                item_name,
+                                                item_bytes_length,
+                                                item_id,
+                                            },
+                                        ));
+                                    }
+                                } else {
                                     Self::metrics_block_process(
                                         item_bytes_length,
                                         item_id,
                                         &status,
                                     );
-
-                                    // Only report status when not ok
-                                    let _ = status_sender.try_send((
-                                        status,
-                                        SendBlockMsgInfo {
-                                            peer,
-                                            item_name,
-                                            item_bytes_length,
-                                            item_id,
-                                        },
-                                    ));
                                 }
-                            } else {
-                                Self::metrics_block_process(item_bytes_length, item_id, &status);
-                            }
-                        },
-                    );
+                            },
+                        );
+
+                    if abandoned {
+                        // the producer has been dropped, consumer thread should exit
+                        return;
+                    }
                     thread::sleep(IBD_BLOCK_FETCH_INTERVAL / 2);
                 })
                 .expect("block queue and consumer thread can't start");
@@ -462,7 +466,7 @@ impl Synchronizer {
 
     /// Process a new block sync from other peer
     //TODO: process block which we don't request
-    pub fn process_new_block(&self, block: core::BlockView) -> Result<bool, CKBError> {
+    pub fn process_new_block(&self, block: Arc<core::BlockView>) -> Result<bool, CKBError> {
         let block_hash = block.hash();
         let status = self.shared.active_chain().get_block_status(&block_hash);
         // NOTE: Filtering `BLOCK_STORED` but not `BLOCK_RECEIVED`, is for avoiding
@@ -471,7 +475,7 @@ impl Synchronizer {
             debug!("block {} already stored", block_hash);
             Ok(false)
         } else if status.contains(BlockStatus::HEADER_VALID) {
-            self.shared.insert_new_block(&self.chain, Arc::new(block))
+            self.shared.insert_new_block(&self.chain, block)
         } else {
             debug!(
                 "Synchronizer process_new_block unexpected status {:?} {}",
