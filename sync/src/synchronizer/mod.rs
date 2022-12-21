@@ -15,7 +15,6 @@ use crate::block_status::BlockStatus;
 use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
 use crate::utils::send_message_to;
 use crate::{Status, StatusCode};
-use crossbeam::queue::ArrayQueue;
 
 use futures::prelude::*;
 
@@ -49,6 +48,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+use ckb_util::Mutex;
+use rtrb::{Producer, RingBuffer};
 
 pub const SEND_GET_HEADERS_TOKEN: u64 = 0;
 pub const IBD_BLOCK_FETCH_TOKEN: u64 = 1;
@@ -229,7 +231,8 @@ pub struct Synchronizer {
     /// Only in IBD mode, downloaded blocks will be pushed to block_queue
     /// The block_queue will be consumed by ProcessBlock thread
     /// If IBD finished, and block_queue will be dropped when the queue is  empty
-    block_queue: ShardedOption<ArrayQueue<(BlockView, SendBlockMsgInfo)>>,
+    rtrb_producer: Arc<Mutex<Producer<(BlockView, SendBlockMsgInfo)>>>,
+    // block_queue: ShardedOption<ArrayQueue<(BlockView, SendBlockMsgInfo)>>,
     /// Only in IBD mode, if no blocks in queue, the consumer thread will park(),
     /// and be notified by this thread handle
     block_queue_consumer_handle: ShardedOption<thread::JoinHandle<()>>,
@@ -245,7 +248,7 @@ impl Clone for Synchronizer {
             chain: self.chain.clone(),
             shared: Arc::clone(&self.shared),
             fetch_channel: self.fetch_channel.clone(),
-            block_queue: Arc::clone(&self.block_queue),
+            rtrb_producer: self.rtrb_producer.clone(),
             block_queue_consumer_handle: Arc::clone(&self.block_queue_consumer_handle),
 
             // we only need one Receiver for CKBProtocolHandler::poll
@@ -261,11 +264,15 @@ impl Synchronizer {
     pub fn new(chain: ChainController, shared: Arc<SyncShared>) -> Synchronizer {
         let (mut status_sender, status_recv) = futures::channel::mpsc::channel(512);
 
+        let (rtrb_producer, mut rtrb_consumer) =
+            RingBuffer::<(BlockView, SendBlockMsgInfo)>::new(512);
+
         let mut sync = Synchronizer {
             chain,
             shared,
             fetch_channel: None,
-            block_queue: Arc::new(ShardedLock::new(None)),
+
+            rtrb_producer: Arc::new(Mutex::new(rtrb_producer)),
             block_queue_consumer_handle: Arc::new(ShardedLock::new(None)),
 
             // only main Synchronizer instance hold status_recv, the clone hold None
@@ -280,23 +287,14 @@ impl Synchronizer {
             .active_chain()
             .is_initial_block_download()
         {
-            let _ = sync_clone
-                .block_queue
-                .write()
-                .expect("Synchronizer wants to acquire write lock on block_queue to fill the block_queue, but it has poisoned")
-                .replace(ArrayQueue::new(512));
-
             let thread_handle = thread::Builder::new()
                 .name("ProcessBlock".to_string())
                 .spawn(move || loop {
-                    if let Some(block_queue) = sync_clone.block_queue.read().expect("Synchronizer wants to acquire read lock on block_queue to consume the block_queue, but it has poisoned").as_ref() {
-                        debug!(
-                            "block queue's len()/capacity() = {}/{}",
-                            block_queue.len(),
-                            block_queue.capacity()
-                        );
-
-                        while let Some((
+                    let chunks = rtrb_consumer
+                        .read_chunk(rtrb_consumer.slots())
+                        .expect("expect to read all items from rtrb");
+                    chunks.into_iter().for_each(
+                        |(
                             block,
                             SendBlockMsgInfo {
                                 peer,
@@ -304,8 +302,7 @@ impl Synchronizer {
                                 item_bytes_length,
                                 item_id,
                             },
-                        )) = block_queue.pop()
-                        {
+                        )| {
                             debug!(
                                 "get block from block_queue, height: {}",
                                 block.number() as u64
@@ -339,11 +336,8 @@ impl Synchronizer {
                             } else {
                                 Self::metrics_block_process(item_bytes_length, item_id, &status);
                             }
-                        }
-                    } else {
-                        // block_queue was dropped, the thread exit
-                        return;
-                    }
+                        },
+                    );
                     thread::sleep(IBD_BLOCK_FETCH_INTERVAL / 2);
                 })
                 .expect("block queue and consumer thread can't start");
@@ -361,10 +355,6 @@ impl Synchronizer {
         sync
     }
 
-    /// Check if block_queue is None
-    pub fn block_queue_is_none(&self) -> bool {
-        self.block_queue.read().expect("Synchronizer wants to acquire read lock on block_queue to check if the block_queue is None, but it has poisoned").is_none()
-    }
     /// Check if block_queue_consumer_handle is None
     pub fn block_queue_consumer_handle_is_none(&self) -> bool {
         self.block_queue_consumer_handle.read().expect("Synchronizer wants to acquire read lock on block_queue_consumer_handle to check if the block_queue_consumer_handle is None, but it has poisoned").is_none()

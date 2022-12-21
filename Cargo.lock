@@ -295,6 +295,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cache-padded"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1db59621ec70f09c5e9b597b220c7a2b43611f4710dc03ceb8748637775692c"
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1309,6 +1315,7 @@ dependencies = [
 name = "ckb-sync"
 version = "0.107.0-pre"
 dependencies = [
+ "arc-swap",
  "bitflags",
  "ckb-app-config",
  "ckb-async-runtime",
@@ -1345,6 +1352,7 @@ dependencies = [
  "lru",
  "once_cell",
  "rand 0.7.3",
+ "rtrb",
  "sentry",
  "sled",
  "tempfile",
@@ -3804,6 +3812,15 @@ dependencies = [
  "untrusted",
  "web-sys",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "rtrb"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99e704dd104faf2326a320140f70f0b736d607c1caa1b1748a6c568a79819109"
+dependencies = [
+ "cache-padded",
 ]
 
 [[package]]
