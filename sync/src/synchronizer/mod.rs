@@ -342,6 +342,11 @@ impl Synchronizer {
                         // the producer has been dropped, consumer thread should exit
                         return;
                     }
+
+                    // If there are no new blocks, sleep, otherwise continue to process
+                    if !block_consumer.is_empty() {
+                        continue;
+                    }
                     thread::sleep(IBD_BLOCK_FETCH_INTERVAL / 2);
                 })
                 .expect("block queue and consumer thread can't start");
