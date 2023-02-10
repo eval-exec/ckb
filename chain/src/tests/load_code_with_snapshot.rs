@@ -14,6 +14,7 @@ use ckb_types::{
     packed::{self, CellDep, CellInput, CellOutputBuilder, OutPoint, Script},
     utilities::DIFF_TWO,
 };
+use ckb_util::long_live_temp_dir;
 
 const TX_FEE: Capacity = capacity_bytes!(10);
 
@@ -160,7 +161,7 @@ fn test_load_code_with_snapshot() {
         .cellbase_maturity(EpochNumberWithFraction::new(0, 0, 1))
         .genesis_block(genesis_block)
         .build();
-    let tmp_dir = tempfile::Builder::new().tempdir().unwrap();
+    let tmp_dir = long_live_temp_dir();
     {
         let tx_pool_config = TxPoolConfig {
             max_tx_verify_cycles: 10_000, // 10_000/ 11_740
@@ -248,7 +249,7 @@ fn _test_load_code_with_snapshot_after_hardfork(script_type: ScriptHashType) {
         .hardfork_switch(hardfork_switch)
         .build();
 
-    let tmp_dir = tempfile::Builder::new().tempdir().unwrap();
+    let tmp_dir = long_live_temp_dir();
     {
         let tx_pool_config = TxPoolConfig {
             max_tx_verify_cycles: 10_000, // 10_000/ 11_740
