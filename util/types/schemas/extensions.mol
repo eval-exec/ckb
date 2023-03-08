@@ -245,11 +245,7 @@ union SyncMessage {
     SendHeaders,
     GetBlocks,
     SendBlock,
-    SetFilter,
-    AddFilter,
-    ClearFilter,
-    FilteredBlock,
-    InIBD,
+    InIBD : 8,
 }
 
 table GetHeaders {
@@ -267,19 +263,6 @@ table SendHeaders {
 
 table SendBlock {
     block:                  Block,
-}
-
-table SetFilter {
-    hash_seed:              Uint32,
-    filter:                 Bytes,
-    num_hashes:             byte,
-}
-
-table AddFilter {
-    filter:                 Bytes,
-}
-
-table ClearFilter {
 }
 
 table FilteredBlock {
