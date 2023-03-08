@@ -7,7 +7,7 @@ use ckb_chain_spec::{
 use ckb_dao::DaoCalculator;
 use ckb_dao_utils::DaoError;
 use ckb_error::{Error, InternalErrorKind};
-use ckb_logger::error_target;
+use ckb_logger::{error, error_target};
 use ckb_merkle_mountain_range::MMRStore;
 use ckb_reward_calculator::RewardCalculator;
 use ckb_store::{data_loader_wrapper::AsDataLoader, ChainStore};
@@ -246,7 +246,11 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
         let no_finalization_target =
             (self.parent.number() + 1) <= self.context.consensus.finalization_delay_length();
 
+        error!("{:?}", self.parent);
         let (target_lock, block_reward) = self.context.finalize_block_reward(self.parent)?;
+        error!("{:?}", target_lock);
+        error!("{:?}", block_reward);
+
         let output = CellOutput::new_builder()
             .capacity(block_reward.total.pack())
             .lock(target_lock.clone())
@@ -264,6 +268,11 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
 
         if !insufficient_reward_to_create_cell {
             if cellbase.transaction.outputs_capacity()? != block_reward.total {
+                error!(
+                    "cellbase outputs_capacity: {}",
+                    cellbase.transaction.outputs_capacity()?
+                );
+                error!("block_reward.total: {}", block_reward.total);
                 return Err((CellbaseError::InvalidRewardAmount).into());
             }
             if cellbase
