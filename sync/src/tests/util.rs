@@ -1,4 +1,4 @@
-use crate::SyncShared;
+use crate::types::sync_shared::SyncShared;
 use ckb_chain::chain::{ChainController, ChainService};
 use ckb_dao::DaoCalculator;
 use ckb_launcher::SharedBuilder;

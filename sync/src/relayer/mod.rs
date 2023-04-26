@@ -20,17 +20,19 @@ use self::get_block_transactions_process::GetBlockTransactionsProcess;
 use self::get_transactions_process::GetTransactionsProcess;
 use self::transaction_hashes_process::TransactionHashesProcess;
 use self::transactions_process::TransactionsProcess;
-use crate::block_status::BlockStatus;
-use crate::types::{ActiveChain, BlockNumberAndHash, SyncShared};
-use crate::utils::{metric_ckb_message_bytes, send_message_to, MetricDirection};
-use crate::{Status, StatusCode};
+use crate::{
+    types::{ActiveChain, BlockNumberAndHash, SyncShared},
+    utils::{metric_ckb_message_bytes, send_message_to, MetricDirection},
+    Status, StatusCode,
+};
 use ckb_chain::chain::ChainController;
 use ckb_constant::sync::BAD_MESSAGE_BAN_TIME;
-use ckb_logger::{debug_target, error_target, info_target, trace_target, warn_target};
+use ckb_logger::{debug, debug_target, error_target, info, info_target, trace_target, warn_target};
 use ckb_network::{
     async_trait, bytes::Bytes, tokio, CKBProtocolContext, CKBProtocolHandler, PeerIndex,
     SupportProtocols, TargetSession,
 };
+use ckb_shared::BlockStatus;
 use ckb_systemtime::unix_time_as_millis;
 use ckb_tx_pool::service::TxVerificationResult;
 use ckb_types::{
@@ -273,7 +275,7 @@ impl Relayer {
                 unix_time_as_millis()
             );
             let block_hash = boxed.hash();
-            self.shared().state().remove_header_view(&block_hash);
+            self.shared().shared().remove_header_view(&block_hash);
             let cb = packed::CompactBlock::build_from_block(&boxed, &HashSet::new());
             let message = packed::RelayMessage::new_builder().set(cb).build();
 
@@ -456,7 +458,7 @@ impl Relayer {
                     }
                 }
                 BlockStatus::BLOCK_RECEIVED => {
-                    if let Some(uncle) = self.shared.state().get_orphan_block(&uncle_hash) {
+                    if let Some(uncle) = self.chain.get_orphan_block(&uncle_hash) {
                         uncles.push(uncle.as_uncle().data());
                     } else {
                         debug_target!(
@@ -867,12 +869,13 @@ impl CKBProtocolHandler for Relayer {
             ASK_FOR_TXS_TOKEN => self.ask_for_txs(nc.as_ref()),
             TX_HASHES_TOKEN => self.send_bulk_of_tx_hashes(nc.as_ref()),
             SEARCH_ORPHAN_POOL_TOKEN => {
-                if !self.shared.state().orphan_pool().is_empty() {
-                    tokio::task::block_in_place(|| {
-                        self.shared.try_search_orphan_pool(&self.chain);
-                        self.shared.periodic_clean_orphan_pool();
-                    })
-                }
+                info!("search orphan pool task is ignored")
+                // if !self.shared.state().orphan_pool().is_empty() {
+                //     tokio::task::block_in_place(|| {
+                //         self.shared.try_search_orphan_pool(&self.chain);
+                //         self.shared.periodic_clean_orphan_pool();
+                //     })
+                // }
             }
             _ => unreachable!(),
         }

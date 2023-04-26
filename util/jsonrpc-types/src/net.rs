@@ -267,13 +267,13 @@ pub struct SyncState {
     pub best_known_block_number: BlockNumber,
     /// This is timestamp of the same block described in `best_known_block_number`.
     pub best_known_block_timestamp: Timestamp,
-    /// Count of orphan blocks the local node has downloaded.
-    ///
-    /// The local node downloads multiple blocks simultaneously but blocks must be connected
-    /// consecutively. If a descendant is downloaded before its ancestors, it becomes an orphan
-    /// block.
-    ///
-    /// If this number is too high, it indicates that block download has stuck at some block.
+    // /// Count of orphan blocks the local node has downloaded.
+    // ///
+    // /// The local node downloads multiple blocks simultaneously but blocks must be connected
+    // /// consecutively. If a descendant is downloaded before its ancestors, it becomes an orphan
+    // /// block.
+    // ///
+    // /// If this number is too high, it indicates that block download has stuck at some block.
     pub orphan_blocks_count: Uint64,
     /// Count of downloading blocks.
     pub inflight_blocks_count: Uint64,

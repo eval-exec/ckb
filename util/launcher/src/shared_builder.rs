@@ -3,8 +3,10 @@
 //! which can be used in order to configure the properties of a new shared.
 
 use crate::migrate::Migrate;
-use ckb_app_config::ExitCode;
-use ckb_app_config::{BlockAssemblerConfig, DBConfig, NotifyConfig, StoreConfig, TxPoolConfig};
+use ckb_app_config::{
+    BlockAssemblerConfig, DBConfig, HeaderMapConfig, NotifyConfig, StoreConfig, TxPoolConfig,
+};
+use ckb_app_config::{ExitCode, SyncConfig};
 use ckb_async_runtime::{new_background_runtime, Handle};
 use ckb_chain_spec::consensus::Consensus;
 use ckb_chain_spec::SpecError;
@@ -17,7 +19,7 @@ use ckb_logger::{error, info};
 use ckb_notify::{NotifyController, NotifyService, PoolTransactionEntry};
 use ckb_proposal_table::ProposalTable;
 use ckb_proposal_table::ProposalView;
-use ckb_shared::Shared;
+use ckb_shared::{HeaderMap, Shared};
 use ckb_snapshot::{Snapshot, SnapshotMgr};
 use ckb_stop_handler::StopHandler;
 use ckb_store::ChainDB;
@@ -45,6 +47,8 @@ pub struct SharedBuilder {
     store_config: Option<StoreConfig>,
     block_assembler_config: Option<BlockAssemblerConfig>,
     notify_config: Option<NotifyConfig>,
+    header_map_memory_limit: Option<usize>,
+    header_map_tmp_dir: Option<PathBuf>,
     async_handle: Handle,
 }
 
@@ -133,6 +137,8 @@ impl SharedBuilder {
             store_config: None,
             block_assembler_config: None,
             async_handle,
+            header_map_memory_limit: None,
+            header_map_tmp_dir: None,
         })
     }
 
@@ -182,6 +188,8 @@ impl SharedBuilder {
                 .get_or_init(new_background_runtime)
                 .0
                 .clone(),
+            header_map_memory_limit: None,
+            header_map_tmp_dir: None,
         })
     }
 }
@@ -214,6 +222,17 @@ impl SharedBuilder {
     /// TODO(doc): @quake
     pub fn block_assembler_config(mut self, config: Option<BlockAssemblerConfig>) -> Self {
         self.block_assembler_config = config;
+        self
+    }
+
+    /// TODO(doc): @eval-exec
+    pub fn header_map_memory_limit(mut self, limit: usize) -> Self {
+        self.header_map_memory_limit = Some(limit);
+        self
+    }
+    /// TODO(doc): @eval-exec
+    pub fn header_map_tmp_dir(mut self, tmp_dir: Option<PathBuf>) -> Self {
+        self.header_map_tmp_dir = tmp_dir;
         self
     }
 
@@ -316,8 +335,13 @@ impl SharedBuilder {
             store_config,
             block_assembler_config,
             notify_config,
+            header_map_memory_limit,
+            header_map_tmp_dir,
             async_handle,
         } = self;
+
+        let header_map_memory_limit = header_map_memory_limit
+            .unwrap_or(HeaderMapConfig::default().memory_limit.as_u64() as usize);
 
         let tx_pool_config = tx_pool_config.unwrap_or_default();
         let notify_config = notify_config.unwrap_or_default();
@@ -354,7 +378,12 @@ impl SharedBuilder {
 
         register_tx_pool_callback(&mut tx_pool_builder, notify_controller.clone());
 
+        info!("header_map.memory_limit {}", header_map_memory_limit);
+
+        let header_map = HeaderMap::new(header_map_tmp_dir, header_map_memory_limit, &async_handle);
+
         let ibd_finished = Arc::new(AtomicBool::new(false));
+
         let shared = Shared::new(
             store,
             tx_pool_controller,
@@ -364,6 +393,7 @@ impl SharedBuilder {
             snapshot_mgr,
             async_handle,
             ibd_finished,
+            header_map,
         );
 
         let pack = SharedPackage {

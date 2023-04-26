@@ -1,8 +1,8 @@
-use crate::block_status::BlockStatus;
 use crate::tests::util::{build_chain, inherit_block};
-use crate::SyncShared;
+use crate::types::sync_shared::SyncShared;
 use ckb_chain::chain::ChainService;
 use ckb_launcher::SharedBuilder;
+use ckb_shared::BlockStatus;
 use ckb_store::{self, ChainStore};
 use ckb_test_chain_utils::always_success_cellbase;
 use ckb_types::core::{BlockBuilder, BlockView, Capacity};

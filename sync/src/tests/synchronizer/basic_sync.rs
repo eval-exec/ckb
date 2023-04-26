@@ -3,7 +3,8 @@ use crate::synchronizer::{
     TIMEOUT_EVICTION_TOKEN,
 };
 use crate::tests::TestNode;
-use crate::{SyncShared, Synchronizer};
+use crate::types::sync_shared::SyncShared;
+use crate::Synchronizer;
 use ckb_chain::chain::ChainService;
 use ckb_chain_spec::consensus::ConsensusBuilder;
 use ckb_channel::bounded;

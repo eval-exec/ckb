@@ -1,5 +1,5 @@
 use crate::types::HeaderView;
-use ckb_async_runtime::Handle;
+use ckb_async_runtime::{tokio, Handle};
 use ckb_stop_handler::{SignalSender, StopHandler};
 use ckb_types::packed::{self, Byte32};
 use std::path;
@@ -29,13 +29,13 @@ impl Drop for HeaderMap {
     }
 }
 
-const INTERVAL: Duration = Duration::from_millis(500);
+const INTERVAL: Duration = Duration::from_millis(5000);
 // key + total_difficulty + skip_hash
 const ITEM_BYTES_SIZE: usize = packed::HeaderView::TOTAL_SIZE + 32 * 3;
 const WARN_THRESHOLD: usize = ITEM_BYTES_SIZE * 100_000;
 
 impl HeaderMap {
-    pub(crate) fn new<P>(tmpdir: Option<P>, memory_limit: usize, async_handle: &Handle) -> Self
+    pub fn new<P>(tmpdir: Option<P>, memory_limit: usize, async_handle: &Handle) -> Self
     where
         P: AsRef<path::Path>,
     {
@@ -72,15 +72,15 @@ impl HeaderMap {
         }
     }
 
-    pub(crate) fn contains_key(&self, hash: &Byte32) -> bool {
+    pub fn contains_key(&self, hash: &Byte32) -> bool {
         self.inner.contains_key(hash)
     }
 
-    pub(crate) fn get(&self, hash: &Byte32) -> Option<HeaderView> {
+    pub fn get(&self, hash: &Byte32) -> Option<HeaderView> {
         self.inner.get(hash)
     }
 
-    pub(crate) fn insert(&self, view: HeaderView) -> Option<()> {
+    pub fn insert(&self, view: HeaderView) -> Option<()> {
         self.inner.insert(view)
     }
 

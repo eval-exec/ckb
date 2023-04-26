@@ -7,7 +7,7 @@ use ckb_chain_spec::{
 use ckb_dao::DaoCalculator;
 use ckb_dao_utils::DaoError;
 use ckb_error::{Error, InternalErrorKind};
-use ckb_logger::error_target;
+use ckb_logger::{debug, error_target};
 use ckb_merkle_mountain_range::MMRStore;
 use ckb_reward_calculator::RewardCalculator;
 use ckb_store::{data_loader_wrapper::AsDataLoader, ChainStore};
@@ -690,6 +690,7 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
 
         BlockExtensionVerifier::new(&self.context, self.chain_root_mmr, &parent).verify(block)?;
 
+        let log_now = std::time::Instant::now();
         let ret = BlockTxsVerifier::new(
             self.context.clone(),
             header,
@@ -697,6 +698,7 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
             &self.txs_verify_cache,
         )
         .verify(resolved, self.switch.disable_script())?;
+        debug!("BlockTxsVerifier cost: {:?}", log_now.elapsed());
         Ok(ret)
     }
 }

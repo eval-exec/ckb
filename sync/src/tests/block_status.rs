@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::block_status::BlockStatus;
+use ckb_shared::BlockStatus;
 
 fn all() -> Vec<BlockStatus> {
     vec![

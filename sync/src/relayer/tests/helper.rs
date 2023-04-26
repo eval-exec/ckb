@@ -1,4 +1,5 @@
-use crate::{Relayer, SyncShared};
+use crate::types::sync_shared::SyncShared;
+use crate::Relayer;
 use ckb_app_config::NetworkConfig;
 use ckb_chain::chain::ChainService;
 use ckb_chain_spec::consensus::{build_genesis_epoch_ext, ConsensusBuilder};

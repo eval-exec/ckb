@@ -1,3 +1,4 @@
+use ckb_logger::debug;
 use std::path;
 
 #[cfg(feature = "stats")]
@@ -130,20 +131,41 @@ where
             self.trace();
             self.stats().tick_primary_delete();
         }
+        let log_now = std::time::Instant::now();
         self.memory.remove(hash);
-        if self.backend.is_empty() {
-            return;
-        }
-        self.backend.remove_no_return(hash);
+        debug!("remove from memory cost {:?}", log_now.elapsed());
+        // if self.backend.is_empty() {
+        //     return;
+        // }
+        // self.backend.remove_no_return(hash);
+        // debug!(
+        //     "remove from memory and backend cost {:?}",
+        //     log_now.elapsed()
+        // );
     }
 
     pub(crate) fn limit_memory(&self) {
+        let log_now = std::time::Instant::now();
         if let Some(values) = self.memory.front_n(self.memory_limit) {
+            let values_len = values.len();
+            debug!("going to insert {} values into backend", values_len);
             tokio::task::block_in_place(|| {
                 self.backend.insert_batch(&values);
             });
+            debug!(
+                "insert {} values into backend done, cost {:?}",
+                values_len,
+                log_now.elapsed()
+            );
             self.memory
                 .remove_batch(values.iter().map(|value| value.hash()));
+            debug!(
+                "limit_memory {} values cost {:?}",
+                values_len,
+                log_now.elapsed()
+            );
+        } else {
+            debug!("limit_memory no values cost {:?}", log_now.elapsed());
         }
     }
 

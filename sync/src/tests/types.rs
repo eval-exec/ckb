@@ -7,7 +7,8 @@ use ckb_types::{
 use rand::{thread_rng, Rng};
 use std::collections::{BTreeMap, HashMap};
 
-use crate::types::{HeaderView, TtlFilter, FILTER_TTL};
+use crate::types::ttl_filter::TtlFilter;
+use crate::types::{HeaderView, FILTER_TTL};
 
 const SKIPLIST_LENGTH: u64 = 10_000;
 

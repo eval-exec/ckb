@@ -1,4 +1,5 @@
-use crate::types::{BlockNumberAndHash, InflightBlocks};
+use crate::types::inflight_blocks::InflightBlocks;
+use crate::types::BlockNumberAndHash;
 use ckb_constant::sync::BLOCK_DOWNLOAD_TIMEOUT;
 use ckb_types::h256;
 use ckb_types::prelude::*;

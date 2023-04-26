@@ -35,10 +35,13 @@ use std::{
     time::Duration,
 };
 
+use crate::types::headers_sync_controller::HeadersSyncController;
+use crate::types::peer_state::PeerState;
+use crate::types::sync_shared::SyncShared;
 use crate::{
     synchronizer::{BlockFetcher, BlockProcess, GetBlocksProcess, HeadersProcess, Synchronizer},
-    types::{HeaderView, HeadersSyncController, IBDState, PeerState},
-    Status, StatusCode, SyncShared,
+    types::{HeaderView, IBDState},
+    Status, StatusCode,
 };
 
 fn start_chain(consensus: Option<Consensus>) -> (ChainController, Shared, Synchronizer) {
@@ -1197,7 +1200,7 @@ fn get_blocks_process() {
 
 #[test]
 fn test_internal_db_error() {
-    use crate::utils::is_internal_db_error;
+    use ckb_error::is_internal_db_error;
 
     let consensus = Consensus::default();
     let mut builder = SharedBuilder::with_temp_db();

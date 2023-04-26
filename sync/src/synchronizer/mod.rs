@@ -12,16 +12,18 @@ pub(crate) use self::get_headers_process::GetHeadersProcess;
 pub(crate) use self::headers_process::HeadersProcess;
 pub(crate) use self::in_ibd_process::InIBDProcess;
 
-use crate::block_status::BlockStatus;
-use crate::types::{HeaderView, HeadersSyncController, IBDState, Peers, SyncShared};
-use crate::utils::{metric_ckb_message_bytes, send_message_to, MetricDirection};
-use crate::{Status, StatusCode};
+use ckb_shared::{BlockStatus, HeaderView};
 
+use crate::{
+    types::{HeadersSyncController, IBDState, Peers, SyncShared},
+    utils::{metric_ckb_message_bytes, send_message_to, MetricDirection},
+    Status, StatusCode,
+};
 use ckb_chain::chain::ChainController;
 use ckb_channel as channel;
 use ckb_constant::sync::{
-    BAD_MESSAGE_BAN_TIME, CHAIN_SYNC_TIMEOUT, EVICTION_HEADERS_RESPONSE_TIME,
-    INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
+    BAD_MESSAGE_BAN_TIME, BLOCK_DOWNLOAD_WINDOW, CHAIN_SYNC_TIMEOUT,
+    EVICTION_HEADERS_RESPONSE_TIME, INIT_BLOCKS_IN_TRANSIT_PER_PEER, MAX_TIP_AGE,
 };
 use ckb_error::Error as CKBError;
 use ckb_logger::{debug, error, info, trace, warn};
@@ -35,6 +37,7 @@ use ckb_types::{
     packed::{self, Byte32},
     prelude::*,
 };
+use std::ops::Sub;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -48,7 +51,7 @@ pub const TIMEOUT_EVICTION_TOKEN: u64 = 3;
 pub const NO_PEER_CHECK_TOKEN: u64 = 255;
 
 const SYNC_NOTIFY_INTERVAL: Duration = Duration::from_secs(1);
-const IBD_BLOCK_FETCH_INTERVAL: Duration = Duration::from_millis(40);
+const IBD_BLOCK_FETCH_INTERVAL: Duration = Duration::from_millis(200);
 const NOT_IBD_BLOCK_FETCH_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Copy, Clone)]
@@ -77,11 +80,20 @@ impl BlockFetchCMD {
                 FetchCMD::Fetch((peers, state)) => match self.can_start() {
                     CanStart::Ready => {
                         for peer in peers {
+                            let log_now = std::time::Instant::now();
                             if let Some(fetch) = BlockFetcher::new(&self.sync, peer, state).fetch()
                             {
+                                let fetch_len = fetch.len();
                                 for item in fetch {
                                     BlockFetchCMD::send_getblocks(item, &self.p2p_control, peer);
                                 }
+
+                                debug!(
+                                    "request from peer-{} for {} blocks, cost {}ms",
+                                    peer,
+                                    fetch_len,
+                                    log_now.elapsed().as_millis()
+                                );
                             }
                         }
                     }
@@ -133,6 +145,7 @@ impl BlockFetchCMD {
         }
 
         let state = self.sync.shared.state();
+        let shared = self.sync.shared.shared();
 
         let min_work_reach = |flag: &mut CanStart| {
             if state.min_chain_work_ready() {
@@ -143,7 +156,7 @@ impl BlockFetchCMD {
         let assume_valid_target_find = |flag: &mut CanStart| {
             let mut assume_valid_target = state.assume_valid_target();
             if let Some(ref target) = *assume_valid_target {
-                match state.header_map().get(&target.pack()) {
+                match shared.header_map().get(&target.pack()) {
                     Some(header) => {
                         *flag = CanStart::Ready;
                         // Blocks that are no longer in the scope of ibd must be forced to verify
@@ -539,18 +552,22 @@ impl Synchronizer {
     }
 
     fn find_blocks_to_fetch(&mut self, nc: &dyn CKBProtocolContext, ibd: IBDState) {
-        let tip = self.shared.active_chain().tip_number();
+        let unverified_tip = self.shared.shared().get_unverified_tip();
 
         let disconnect_list = {
-            let mut list = self.shared().state().write_inflight_blocks().prune(tip);
+            let mut list = self
+                .shared()
+                .state()
+                .write_inflight_blocks()
+                .prune(unverified_tip.number());
             if let IBDState::In = ibd {
-                // best known < tip and in IBD state, and unknown list is empty,
+                // best known < unverified_tip and in IBD state, and unknown list is empty,
                 // these node can be disconnect
                 list.extend(
                     self.shared
                         .state()
                         .peers()
-                        .get_best_known_less_than_tip_and_unknown_empty(tip),
+                        .get_best_known_less_than_tip_and_unknown_empty(unverified_tip.number()),
                 )
             };
             list
@@ -571,7 +588,9 @@ impl Synchronizer {
                 continue;
             }
             if let Err(err) = nc.disconnect(*peer, "sync disconnect") {
-                debug!("synchronizer disconnect error: {:?}", err);
+                debug!("synchronizer disconnect peer-{}, error: {:?}", *peer, err);
+            } else {
+                debug!("synchronizer disconnect peer-{}", *peer);
             }
         }
 
@@ -580,7 +599,18 @@ impl Synchronizer {
         match nc.p2p_control() {
             Some(raw) => match self.fetch_channel {
                 Some(ref sender) => {
-                    if !sender.is_full() {
+                    if sender.is_full() {
+                        debug!("find_blocks_to_fetch: fetch_channel is full");
+                    } else if self
+                        .shared
+                        .shared()
+                        .get_unverified_tip()
+                        .number()
+                        .sub(self.shared().active_chain().tip_number())
+                        >= BLOCK_DOWNLOAD_WINDOW * 10
+                    {
+                        debug!("there are too many unverified blocks, don't fetch now");
+                    } else {
                         let peers = self.get_peers_to_fetch(ibd, &disconnect_list);
                         let _ignore = sender.try_send(FetchCMD::Fetch((peers, ibd)));
                     }
@@ -757,6 +787,7 @@ impl CKBProtocolHandler for Synchronizer {
     ) {
         let sync_state = self.shared().state();
         sync_state.disconnected(peer_index);
+        info!("SyncProtocol.disconnected peer-{}", peer_index);
     }
 
     async fn notify(&mut self, nc: Arc<dyn CKBProtocolContext + Sync>, token: u64) {

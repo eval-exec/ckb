@@ -33,7 +33,8 @@ use ckb_rpc::{RpcServer, ServiceBuilder};
 use ckb_shared::Shared;
 use ckb_stop_handler::StopHandler;
 use ckb_store::{ChainDB, ChainStore};
-use ckb_sync::{BlockFilter, NetTimeProtocol, Relayer, SyncShared, Synchronizer};
+use ckb_sync::SyncShared;
+use ckb_sync::{BlockFilter, NetTimeProtocol, Relayer, Synchronizer};
 use ckb_tx_pool::service::TxVerificationResult;
 use ckb_types::prelude::*;
 use ckb_verification::GenesisVerifier;
@@ -212,6 +213,16 @@ impl Launcher {
             .notify_config(self.args.config.notify.clone())
             .store_config(self.args.config.store)
             .block_assembler_config(block_assembler_config)
+            .header_map_tmp_dir(self.args.config.tmp_dir.clone())
+            .header_map_memory_limit(
+                self.args
+                    .config
+                    .network
+                    .sync
+                    .header_map
+                    .memory_limit
+                    .as_u64() as usize,
+            )
             .build()?;
 
         // internal check migrate_version
@@ -273,10 +284,9 @@ impl Launcher {
         miner_enable: bool,
         relay_tx_receiver: Receiver<TxVerificationResult>,
     ) -> (NetworkController, RpcServer) {
-        let sync_shared = Arc::new(SyncShared::with_tmpdir(
+        let sync_shared = Arc::new(SyncShared::new(
             shared.clone(),
             self.args.config.network.sync.clone(),
-            self.args.config.tmp_dir.as_ref(),
             relay_tx_receiver,
         ));
         let network_state = Arc::new(
@@ -394,7 +404,11 @@ impl Launcher {
                 chain_controller.clone(),
                 miner_enable,
             )
-            .enable_net(network_controller.clone(), sync_shared)
+            .enable_net(
+                network_controller.clone(),
+                sync_shared,
+                Arc::new(chain_controller.clone()),
+            )
             .enable_stats(shared.clone(), Arc::clone(&alert_notifier))
             .enable_experiment(shared.clone())
             .enable_integration_test(shared.clone(), network_controller.clone(), chain_controller)
