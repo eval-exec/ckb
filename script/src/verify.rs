@@ -31,12 +31,13 @@ use ckb_vm::{
     snapshot::{resume, Snapshot},
     DefaultMachineBuilder, Error as VMInternalError, SupportMachine, Syscalls,
 };
+use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-#[cfg(test)]
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 
 #[cfg(test)]
 mod tests;
@@ -63,33 +64,33 @@ enum DataGuard {
 }
 
 /// LazyData wrapper make sure not-loaded data will be loaded only after one access
-#[derive(Debug, PartialEq, Eq, Clone)]
-struct LazyData(RefCell<DataGuard>);
+#[derive(Debug, Clone)]
+struct LazyData(Arc<Mutex<DataGuard>>);
 
 impl LazyData {
     fn from_cell_meta(cell_meta: &CellMeta) -> LazyData {
         match &cell_meta.mem_cell_data {
-            Some(data) => LazyData(RefCell::new(DataGuard::Loaded(data.to_owned()))),
-            None => LazyData(RefCell::new(DataGuard::NotLoaded(
+            Some(data) => LazyData(Arc::new(Mutex::new(DataGuard::Loaded(data.to_owned())))),
+            None => LazyData(Arc::new(Mutex::new(DataGuard::NotLoaded(
                 cell_meta.out_point.clone(),
-            ))),
+            )))),
         }
     }
 
     fn access<DL: CellDataProvider>(&self, data_loader: &DL) -> Bytes {
-        let guard = self.0.borrow().to_owned();
-        match guard {
+        let mut guard = self.0.lock().expect("failed to get lazy data lock");
+        match &*guard {
             DataGuard::NotLoaded(out_point) => {
                 let data = data_loader.get_cell_data(&out_point).expect("cell data");
-                self.0.replace(DataGuard::Loaded(data.to_owned()));
+                *guard = DataGuard::Loaded(data.to_owned());
                 data
             }
-            DataGuard::Loaded(bytes) => bytes,
+            DataGuard::Loaded(bytes) => bytes.to_owned(),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug)]
 enum Binaries {
     Unique(Byte32, LazyData),
     Duplicate(Byte32, LazyData),
@@ -377,22 +378,43 @@ impl<DL: CellDataProvider + HeaderProvider + Send + Sync + Clone + 'static>
     ///
     /// It returns the total consumed cycles on success, Otherwise it returns the verification error.
     pub fn verify(&self, max_cycles: Cycle) -> Result<Cycle, Error> {
-        let mut cycles: Cycle = 0;
-
-        // Now run each script group
-        for (_hash, group) in self.groups() {
-            // max_cycles must reduce by each group exec
-            let used_cycles = self
-                .verify_script_group(group, max_cycles - cycles)
-                .map_err(|e| {
-                    #[cfg(feature = "logging")]
-                    logging::on_script_error(_hash, &self.hash(), &e);
-                    e.source(group)
-                })?;
-
-            cycles = wrapping_cycles_add(cycles, used_cycles, group)?;
+        let groups_used_cycles = AtomicU64::new(0);
+        match self.groups().par_bridge().try_for_each(|(hash, group)| {
+            match self.verify_script_group(group, max_cycles).map_err(|e| {
+                #[cfg(feature = "logging")]
+                logging::on_script_error(hash, &self.hash(), &e);
+                e.source(group)
+            }) {
+                Ok(used_cycles) => {
+                    let old_groups_used_cycles =
+                        groups_used_cycles.fetch_add(used_cycles, Ordering::Acquire);
+                    if groups_used_cycles.load(Ordering::Acquire) < old_groups_used_cycles {
+                        Err(ScriptError::CyclesOverflow(
+                            old_groups_used_cycles as Cycle,
+                            used_cycles as Cycle,
+                        )
+                        .source(group))
+                    } else {
+                        Ok(())
+                    }
+                }
+                Err(err) => Err(err),
+            }
+        }) {
+            Ok(_) => {
+                if groups_used_cycles
+                    .load(Ordering::SeqCst)
+                    .cmp(&max_cycles)
+                    .is_ge()
+                {
+                    return Err(ScriptError::ExceededMaximumCycles(max_cycles)
+                        .unknown_source()
+                        .into());
+                }
+                Ok(groups_used_cycles.load(Ordering::SeqCst))
+            }
+            Err(err) => Err(err.into()),
         }
-        Ok(cycles)
     }
 
     fn build_state(
