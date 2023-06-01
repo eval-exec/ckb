@@ -1286,6 +1286,8 @@ version = "0.112.0-pre"
 dependencies = [
  "ckb-channel",
  "ckb-logger",
+ "ckb-util",
+ "once_cell",
  "parking_lot 0.12.1",
  "tokio",
 ]
