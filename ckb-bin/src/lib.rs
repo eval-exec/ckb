@@ -76,7 +76,6 @@ pub fn run_app(version: Version) -> Result<(), ExitCode> {
         _ => unreachable!(),
     };
 
-    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     ret
 }
 
