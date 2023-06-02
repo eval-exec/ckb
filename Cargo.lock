@@ -492,6 +492,7 @@ dependencies = [
  "ckb-network",
  "ckb-resource",
  "ckb-shared",
+ "ckb-stop-handler",
  "ckb-store",
  "ckb-types",
  "ckb-util",
