@@ -33,6 +33,36 @@ static CKB_HANDLES: once_cell::sync::Lazy<Mutex<CkbHandle>> = once_cell::sync::L
     })
 });
 
+static TOKIO_EXIT: once_cell::sync::Lazy<(
+    tokio::sync::watch::Sender<bool>,
+    tokio::sync::watch::Receiver<bool>,
+)> = once_cell::sync::Lazy::new(|| {
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    (tx, rx)
+});
+
+static CROSSBEAM_EXIT_SENDERS: once_cell::sync::Lazy<Mutex<Vec<ckb_channel::Sender<()>>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(vec![]));
+
+pub fn new_tokio_exit_rx() -> tokio::sync::watch::Receiver<bool> {
+    TOKIO_EXIT.1.clone()
+}
+
+pub fn new_crossbeam_exit_rx() -> ckb_channel::Receiver<()> {
+    let (tx, rx) = ckb_channel::bounded(1);
+    CROSSBEAM_EXIT_SENDERS.lock().push(tx);
+    rx
+}
+
+pub fn broadcast_exit_signals() {
+    TOKIO_EXIT.0.send_modify(|x| *x = true);
+    CROSSBEAM_EXIT_SENDERS.lock().iter().for_each(|tx| {
+        if let Err(e) = tx.try_send(()) {
+            todo!("log error")
+        }
+    });
+}
+
 pub fn register_thread(thread_handle: std::thread::JoinHandle<()>) {
     CKB_HANDLES.lock().thread_handles.push(thread_handle);
 }
