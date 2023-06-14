@@ -8,6 +8,8 @@ mod subcommand;
 use ckb_app_config::{cli, ExitCode, Setup};
 use ckb_async_runtime::new_global_runtime;
 use ckb_build_info::Version;
+use ckb_network::tokio;
+use ckb_stop_handler::{broadcast_exit_signals, wait_all_ckb_services_exit};
 use helper::raise_fd_limit;
 use setup_guard::SetupGuard;
 use std::time::Duration;
@@ -58,9 +60,10 @@ pub fn run_app(version: Version) -> Result<(), ExitCode> {
         .expect("SubcommandRequiredElseHelp");
     let is_silent_logging = is_silent_logging(cmd);
 
-    let (handle, runtime) = new_global_runtime();
+    let (handle, mut handle_stop_rx, _runtime) = new_global_runtime();
     let setup = Setup::from_matches(bin_name, cmd, matches)?;
-    let _guard = SetupGuard::from_setup(&setup, &version, handle.clone(), is_silent_logging)?;
+    let handle_clone = handle.clone();
+    let _guard = SetupGuard::from_setup(&setup, &version, handle_clone, is_silent_logging)?;
 
     raise_fd_limit();
 
@@ -75,6 +78,10 @@ pub fn run_app(version: Version) -> Result<(), ExitCode> {
         cli::CMD_MIGRATE => subcommand::migrate(setup.migrate(matches)?),
         _ => unreachable!(),
     };
+
+    tokio::task::block_in_place(|| {
+        handle_stop_rx.blocking_recv();
+    });
 
     ret
 }

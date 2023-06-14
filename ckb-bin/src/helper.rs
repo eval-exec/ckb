@@ -1,4 +1,6 @@
 use ckb_logger::info;
+
+use ckb_stop_handler::register_thread;
 use std::io::{stdin, stdout, Write};
 
 #[cfg(not(feature = "deadlock_detection"))]
@@ -11,22 +13,34 @@ pub fn deadlock_detection() {
     use std::{thread, time::Duration};
 
     info!("deadlock_detection enable");
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(10));
-        let deadlocks = deadlock::check_deadlock();
-        if deadlocks.is_empty() {
-            continue;
-        }
+    let dead_lock_jh = thread::spawn({
+        let tick = ckb_channel::tick(Duration::from_secs(10));
+        let stop_rx = new_crossbeam_exit_rx();
+        move || loop {
+            select! {
+                recv(ticker) -> _ => {
+                    let deadlocks = deadlock::check_deadlock();
+                    if deadlocks.is_empty() {
+                        continue;
+                    }
 
-        warn!("{} deadlocks detected", deadlocks.len());
-        for (i, threads) in deadlocks.iter().enumerate() {
-            warn!("Deadlock #{}", i);
-            for t in threads {
-                warn!("Thread Id {:#?}", t.thread_id());
-                warn!("{:#?}", t.backtrace());
+                    warn!("{} deadlocks detected", deadlocks.len());
+                    for (i, threads) in deadlocks.iter().enumerate() {
+                        warn!("Deadlock #{}", i);
+                        for t in threads {
+                            warn!("Thread Id {:#?}", t.thread_id());
+                            warn!("{:#?}", t.backtrace());
+                        }
+                    }
+
+                },
+                recv(stop_rx) -> _ =>{
+                    return;
+                }
             }
         }
     });
+    register_thread("dead_lock_detect", dead_lock_jh);
 }
 
 pub fn prompt(msg: &str) -> String {

@@ -523,7 +523,11 @@ impl TxPoolServiceBuilder {
                         let service_clone = process_service.clone();
                         handle_clone.spawn(process(service_clone, message));
                     },
-                    _ = signal_receiver.changed() => break,
+                    _ = signal_receiver.changed() => {
+                        info!("TxPool is saving, please wait...");
+                        process_service.save_pool().await;
+                        break
+                    },
                     else => break,
                 }
             }
