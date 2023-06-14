@@ -1,17 +1,18 @@
 //! Utilities for tokio runtime.
 
 use ckb_spawn::Spawn;
-use ckb_stop_handler::{SignalSender, StopHandler};
+// use ckb_stop_handler::{SignalSender, StopHandler};
 use core::future::Future;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::thread;
+
 use tokio::runtime::Builder;
 use tokio::runtime::Handle as TokioHandle;
-use tokio::sync::oneshot;
+
 use tokio::task::JoinHandle;
 
 pub use tokio;
 pub use tokio::runtime::Runtime;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 // Handle is a newtype wrap and unwrap tokio::Handle, it is workaround with Rust Orphan Rules.
 // We need `Handle` impl ckb spawn trait decouple tokio dependence
@@ -20,6 +21,7 @@ pub use tokio::runtime::Runtime;
 #[derive(Debug, Clone)]
 pub struct Handle {
     pub(crate) inner: TokioHandle,
+    pub guard: Option<Sender<()>>,
 }
 
 impl Handle {
@@ -42,6 +44,8 @@ impl Handle {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
+        let _guard = self.guard.clone();
+
         self.inner.spawn(future)
     }
 
@@ -101,33 +105,45 @@ fn new_runtime() -> Runtime {
 }
 
 /// Create new threaded_scheduler tokio Runtime, return `Runtime`
-pub fn new_global_runtime() -> (Handle, Runtime) {
+pub fn new_global_runtime() -> (Handle, Receiver<()>, Runtime) {
     let runtime = new_runtime();
     let handle = runtime.handle().clone();
-
-    (Handle { inner: handle }, runtime)
-}
-
-/// Create new threaded_scheduler tokio Runtime, return `Handle` and background thread join handle,
-/// NOTICE: This is only used in testing
-pub fn new_background_runtime() -> (Handle, StopHandler<()>) {
-    let runtime = new_runtime();
-    let handle = runtime.handle().clone();
-
-    let (tx, rx) = oneshot::channel();
-    let thread = thread::Builder::new()
-        .name("GlobalRtBuilder".to_string())
-        .spawn(move || {
-            let ret = runtime.block_on(rx);
-            ckb_logger::debug!("global runtime finish {:?}", ret);
-        })
-        .expect("tokio runtime started");
+    let (guard, handle_stop_rx): (Sender<()>, Receiver<()>) = tokio::sync::mpsc::channel::<()>(1);
 
     (
-        Handle { inner: handle },
-        StopHandler::new(SignalSender::Tokio(tx), Some(thread), "GT".to_string()),
+        Handle {
+            inner: handle,
+            guard: Some(guard),
+        },
+        handle_stop_rx,
+        runtime,
     )
 }
+pub fn new_background_runtime() -> Handle {
+    // new_background_runtime()
+    todo!()
+}
+
+// /// Create new threaded_scheduler tokio Runtime, return `Handle` and background thread join handle,
+// /// NOTICE: This is only used in testing
+// pub fn new_background_runtime() -> (Handle, StopHandler<()>) {
+//     let runtime = new_runtime();
+//     let handle = runtime.handle().clone();
+//
+//     let (tx, rx) = oneshot::channel();
+//     let thread = thread::Builder::new()
+//         .name("GlobalRtBuilder".to_string())
+//         .spawn(move || {
+//             let ret = runtime.block_on(rx);
+//             ckb_logger::debug!("global runtime finish {:?}", ret);
+//         })
+//         .expect("tokio runtime started");
+//
+//     (
+//         Handle { inner: handle },
+//         StopHandler::new(SignalSender::Tokio(tx), Some(thread), "GT".to_string()),
+//     )
+// }
 
 impl Spawn for Handle {
     fn spawn_task<F>(&self, future: F)

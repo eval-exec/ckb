@@ -9,8 +9,9 @@ use hyper::{
 };
 use prometheus::Encoder as _;
 
-use ckb_async_runtime::Handle;
+use ckb_async_runtime::{Handle};
 use ckb_metrics_config::{Config, Exporter, Target};
+use ckb_stop_handler::{new_tokio_exit_rx};
 use ckb_util::strings;
 
 /// Ensures the metrics service can shutdown gracefully.
@@ -59,7 +60,12 @@ fn run_exporter(exporter: Exporter, handle: &Handle) -> Result<(), String> {
             });
             ckb_logger::info!("start prometheus exporter at {}", addr);
             handle.spawn(async move {
-                let server = Server::bind(&addr).serve(make_svc);
+                let server = Server::bind(&addr)
+                    .serve(make_svc)
+                    .with_graceful_shutdown(async {
+                        let exit_rx = new_tokio_exit_rx();
+                        exit_rx.cancelled().await;
+                    });
                 if let Err(err) = server.await {
                     ckb_logger::error!("prometheus server error: {}", err);
                 }
