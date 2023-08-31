@@ -1306,31 +1306,27 @@ impl SyncShared {
             .write_inflight_blocks()
             .remove_by_block((block.number(), block.hash()).into())
         {
-            {
-                let status = self.shared().get_block_status(&block.hash());
-                debug!(
-                    "new_block_received {}-{}, status: {:?}",
-                    block.number(),
-                    block.hash(),
-                    status
-                );
-            }
-            self.shared()
-                .insert_block_status(block.hash(), BlockStatus::BLOCK_RECEIVED);
-            true
-        } else {
-            false
+            return false;
         }
-        let mut is_new_block_received: bool = false;
-        let status = self
-            .shared()
-            .block_status_map()
-            .entry(block.hash())
-            .or_insert(BlockStatus::BLOCK_RECEIVED);
-        if status.eq(&BlockStatus::BLOCK_RECEIVED) {
-            is_new_block_received = true;
+
+        let status = self.shared().get_block_status(&block.hash());
+        debug!(
+            "new_block_received {}-{}, status: {:?}",
+            block.number(),
+            block.hash(),
+            status
+        );
+        if !BlockStatus::HEADER_VALID.eq(&status) {
+            return false;
         }
-        is_new_block_received
+
+        if let dashmap::mapref::entry::Entry::Vacant(status) =
+            self.shared().block_status_map().entry(block.hash())
+        {
+            status.insert(BlockStatus::BLOCK_RECEIVED);
+            return true;
+        }
+        false
     }
 }
 
