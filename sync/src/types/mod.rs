@@ -1293,17 +1293,23 @@ impl SyncShared {
 
     // Return true when the block is that we have requested and received first time.
     pub fn new_block_received(&self, block: &core::BlockView) -> bool {
-        if self
+        if !self
             .state()
             .write_inflight_blocks()
             .remove_by_block((block.number(), block.hash()).into())
         {
-            self.shared()
-                .insert_block_status(block.hash(), BlockStatus::BLOCK_RECEIVED);
-            true
-        } else {
-            false
+            return false;
         }
+        let mut is_new_block_received: bool = false;
+        let status = self
+            .shared()
+            .block_status_map()
+            .entry(block.hash())
+            .or_insert(BlockStatus::BLOCK_RECEIVED);
+        if status.eq(&BlockStatus::BLOCK_RECEIVED) {
+            is_new_block_received = true;
+        }
+        is_new_block_received
     }
 }
 
