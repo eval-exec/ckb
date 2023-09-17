@@ -988,6 +988,11 @@ pub(crate) type PendingCompactBlockMap = HashMap<
 pub struct SyncShared {
     shared: Shared,
     state: Arc<SyncState>,
+
+    pub(crate) verify_failed_blocks_tx:
+        Arc<tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>>,
+    pub(crate) verify_failed_blocks_rx:
+        Arc<tokio::sync::mpsc::UnboundedReceiver<VerifyFailedBlockInfo>>,
 }
 
 impl SyncShared {
@@ -1039,9 +1044,14 @@ impl SyncShared {
             min_chain_work: sync_config.min_chain_work,
         };
 
+        let (verify_failed_blocks_tx, verify_failed_blocks_rx) =
+            tokio::sync::mpsc::unbounded_channel::<VerifyFailedBlockInfo>();
+
         SyncShared {
             shared,
             state: Arc::new(state),
+            verify_failed_blocks_tx: Arc::new(verify_failed_blocks_tx),
+            verify_failed_blocks_rx: Arc::new(verify_failed_blocks_rx),
         }
     }
 
@@ -1073,6 +1083,22 @@ impl SyncShared {
         self.shared.consensus()
     }
 
+    pub fn insert_new_block_with_callback(
+        &self,
+        chain: &ChainController,
+        block: Arc<core::BlockView>,
+        peer_id: PeerIndex,
+        verify_success_callback: fn(&Shared, PeerIndex, Arc<core::BlockView>),
+    ) {
+        self.accept_block(
+            chain,
+            Arc::clone(&block),
+            peer_id,
+            Some(verify_success_callback),
+            None,
+        )
+    }
+
     /// Insert new block to chain store
     pub fn insert_new_block(
         &self,
@@ -1091,8 +1117,27 @@ impl SyncShared {
         //     return Ok(false);
         // }
 
+        let verify_failed_callback =
+            || match self.verify_failed_blocks_tx.send(VerifyFailedBlockInfo {
+                block_hash: block.header().hash(),
+                peer_id,
+                message_bytes: 0,
+                reason: "".to_string(),
+            }) {
+                Err(e) => {
+                    todo!("how to handle this ???")
+                }
+                _ => (),
+            };
+
         // Attempt to accept the given block if its parent already exist in database
-        self.accept_block(chain, Arc::clone(&block), peer_id);
+        self.accept_block(
+            chain,
+            Arc::clone(&block),
+            peer_id,
+            None,
+            Some(verify_failed_callback),
+        );
         // if ret.is_err() {
         //     debug!("accept block {:?} {:?}", block, ret);
         //     return ret;
@@ -1161,6 +1206,8 @@ impl SyncShared {
         chain: &ChainController,
         block: Arc<core::BlockView>,
         peer_id: PeerIndex,
+        verify_ok_callback: Option<fn(&Shared, PeerIndex, Arc<core::BlockView>)>,
+        verify_failed_callback: Option<fn()>,
     ) {
         // let ret = {
         //     let mut assume_valid_target = self.state.assume_valid_target();
@@ -1183,7 +1230,9 @@ impl SyncShared {
         let lonely_block = LonelyBlock {
             block,
             peer_id: Some(peer_id),
-            switch: Switch::NONE,
+            switch: Some(Switch::NONE),
+            verify_ok_callback: None,
+            verify_failed_callback,
         };
 
         chain.process_block(lonely_block);
