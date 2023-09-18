@@ -1078,7 +1078,7 @@ impl SyncShared {
         chain: &ChainController,
         block: Arc<core::BlockView>,
         peer_id: PeerIndex,
-        verify_success_callback: impl FnOnce() + Send + Sync,
+        verify_success_callback: impl FnOnce() + Send + Sync + 'static,
     ) {
         self.accept_block(
             chain,
