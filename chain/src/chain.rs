@@ -520,6 +520,7 @@ impl ChainService {
             if let Some(metrics) = ckb_metrics::handle() {
                 metrics.ckb_chain_tip.set(block.header().number() as i64);
             }
+            Ok(true)
         } else {
             self.shared.refresh_snapshot();
             info!(
@@ -538,9 +539,10 @@ impl ChainService {
                     error!("notify new_uncle error {}", e);
                 }
             }
-        }
 
-        Ok(true)
+            // This block is uncle block, we didn't verify it
+            Ok(false)
+        }
     }
 
     pub(crate) fn update_proposal_table(&mut self, fork: &ForkChanges) {
