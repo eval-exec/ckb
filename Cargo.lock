@@ -716,6 +716,7 @@ dependencies = [
  "is_sorted",
  "lazy_static",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
