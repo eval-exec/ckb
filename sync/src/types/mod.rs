@@ -1203,11 +1203,10 @@ impl SyncShared {
         //     }
         // };
 
-        // TODO move switch logic to ckb-chain
         let lonely_block_with_callback = LonelyBlock {
             block,
             peer_id: Some(peer_id),
-            switch: Some(Switch::NONE),
+            switch: None,
         }
         .with_callback(verify_callback);
 
