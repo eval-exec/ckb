@@ -33,8 +33,9 @@ use ckb_verification::{BlockVerifier, InvalidParentError, NonContextualBlockTxsV
 use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
 use ckb_verification_traits::{Switch, Verifier};
 use std::collections::{HashSet, VecDeque};
+use std::ops::AddAssign;
 use std::sync::Arc;
-use std::{cmp, thread};
+use std::{cmp, thread, time::Duration};
 
 type ProcessBlockRequest = Request<(Arc<BlockView>, Switch), Result<bool, Error>>;
 type TruncateRequest = Request<Byte32, Result<(), Error>>;
@@ -196,12 +197,25 @@ impl GlobalIndex {
     }
 }
 
+#[derive(Default, Debug)]
+struct TimeCost {
+    wait_process_block: Duration,
+    process_block: Duration,
+
+    db_commit: Duration,
+    resolve_block_transactions: Duration,
+    non_contextual_block_verifier: Duration,
+    contextual_block_verifier: Duration,
+    verify_script: Duration,
+}
+
 /// Chain background service
 ///
 /// The ChainService provides a single-threaded background executor.
 pub struct ChainService {
     shared: Shared,
     proposal_table: ProposalTable,
+    time_cost: TimeCost,
 }
 
 impl ChainService {
@@ -210,6 +224,7 @@ impl ChainService {
         ChainService {
             shared,
             proposal_table,
+            time_cost: TimeCost::default(),
         }
     }
 
@@ -228,6 +243,7 @@ impl ChainService {
 
         let thread = thread_builder
             .spawn(move || loop {
+                let trace_start = std::time::Instant::now();
                 select! {
                     recv(signal_receiver) -> _ => {
                         break;
@@ -235,7 +251,9 @@ impl ChainService {
                     recv(process_block_receiver) -> msg => match msg {
                         Ok(Request { responder, arguments: (block, verify) }) => {
                             let _ = tx_control.suspend_chunk_process();
+                            self.time_cost.wait_process_block.add_assign(trace_start.elapsed());
                             let _ = responder.send(self.process_block(block, verify));
+                            self.time_cost.process_block.add_assign(trace_start.elapsed());
                             let _ = tx_control.continue_chunk_process();
                         },
                         _ => {
@@ -347,10 +365,16 @@ impl ChainService {
             warn!("receive 0 number block: 0-{}", block_hash);
         }
 
-        self.insert_block(block, switch).map(|ret| {
+        let result = self.insert_block(block, switch).map(|ret| {
             debug!("finish processing block");
             ret
-        })
+        });
+
+        if block_number == 1 || block_number % 100_000 == 0 {
+            info!("block:{}, time_cost {:?}", block_number, self.time_cost);
+        }
+
+        result
     }
 
     fn non_contextual_verify(&self, block: &BlockView) -> Result<(), Error> {
@@ -373,6 +397,7 @@ impl ChainService {
     }
 
     fn insert_block(&mut self, block: Arc<BlockView>, switch: Switch) -> Result<bool, Error> {
+        let start_time = std::time::Instant::now();
         let db_txn = Arc::new(self.shared.store().begin_transaction());
         let txn_snapshot = db_txn.get_snapshot();
         let _snapshot_tip_hash = db_txn.get_update_for_tip_hash(&txn_snapshot);
@@ -385,6 +410,9 @@ impl ChainService {
         if !switch.disable_non_contextual() {
             self.non_contextual_verify(&block)?;
         }
+        self.time_cost
+            .non_contextual_block_verifier
+            .add_assign(start_time.elapsed());
 
         let mut total_difficulty = U256::zero();
         let mut fork = ForkChanges::default();
@@ -471,6 +499,8 @@ impl ChainService {
             db_txn.insert_block_ext(&block.header().hash(), &ext)?;
         }
         db_txn.commit()?;
+
+        self.time_cost.db_commit.add_assign(start_time.elapsed());
 
         if new_best_block {
             let tip_header = block.header();
@@ -719,7 +749,7 @@ impl ChainService {
 
     // we found new best_block
     pub(crate) fn reconcile_main_chain(
-        &self,
+        &mut self,
         txn: Arc<StoreTransaction>,
         fork: &mut ForkChanges,
         switch: Switch,
@@ -753,9 +783,13 @@ impl ChainService {
             .iter()
             .zip(fork.attached_blocks.iter().skip(verified_len))
         {
+            let start_time = std::time::Instant::now();
             if !switch.disable_all() {
                 if found_error.is_none() {
                     let resolved = self.resolve_block_transactions(&txn, b, &verify_context);
+                    self.time_cost
+                        .resolve_block_transactions
+                        .add_assign(start_time.elapsed());
                     match resolved {
                         Ok(resolved) => {
                             let verified = {
@@ -766,7 +800,15 @@ impl ChainService {
                                     Arc::clone(&txs_verify_cache),
                                     &mmr,
                                 );
-                                contextual_block_verifier.verify(&resolved, b)
+                                let result = contextual_block_verifier.verify(
+                                    &resolved,
+                                    b,
+                                    &mut self.time_cost.verify_script,
+                                );
+                                self.time_cost
+                                    .contextual_block_verifier
+                                    .add_assign(start_time.elapsed());
+                                result
                             };
                             match verified {
                                 Ok((cycles, cache_entries)) => {

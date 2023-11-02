@@ -33,6 +33,7 @@ use ckb_verification::{BlockTransactionsError, EpochError, TxVerifyEnv};
 use ckb_verification_traits::Switch;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::{HashMap, HashSet};
+use std::ops::AddAssign;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 
@@ -644,6 +645,7 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
         &'a self,
         resolved: &'a [Arc<ResolvedTransaction>],
         block: &'a BlockView,
+        verify_script_cost: &mut std::time::Duration,
     ) -> Result<(Cycle, Vec<Completed>), Error> {
         let parent_hash = block.data().header().raw().parent_hash();
         let header = block.header();
@@ -690,6 +692,7 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
 
         BlockExtensionVerifier::new(&self.context, self.chain_root_mmr, &parent).verify(block)?;
 
+        let start_time = std::time::Instant::now();
         let ret = BlockTxsVerifier::new(
             self.context.clone(),
             header,
@@ -697,6 +700,7 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
             &self.txs_verify_cache,
         )
         .verify(resolved, self.switch.disable_script())?;
+        verify_script_cost.add_assign(start_time.elapsed());
         Ok(ret)
     }
 }
