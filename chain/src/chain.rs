@@ -201,6 +201,7 @@ impl GlobalIndex {
 struct TimeCost {
     wait_process_block: Duration,
     process_block: Duration,
+    until_process_block: Duration,
 
     db_commit: Duration,
     resolve_block_transactions: Duration,
@@ -253,8 +254,12 @@ impl ChainService {
                         Ok(Request { responder, arguments: (block, verify) }) => {
                             let _ = tx_control.suspend_chunk_process();
                             self.time_cost.wait_process_block.add_assign(trace_start.elapsed());
-                            let _ = responder.send(self.process_block(block, verify));
-                            self.time_cost.process_block.add_assign(trace_start.elapsed());
+                            {
+                                let trace_start = std::time::Instant::now();
+                                let _ = responder.send(self.process_block(block, verify));
+                                self.time_cost.process_block.add_assign(trace_start.elapsed());
+                            }
+                            self.time_cost.until_process_block.add_assign(trace_start.elapsed());
                             let _ = tx_control.continue_chunk_process();
                         },
                         _ => {
