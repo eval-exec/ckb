@@ -43,6 +43,7 @@ use ckb_types::{
     packed::{self, Byte32},
     prelude::*,
 };
+use std::ops::AddAssign;
 use std::{
     collections::HashSet,
     sync::{atomic::Ordering, Arc},
@@ -215,6 +216,15 @@ impl BlockFetchCMD {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct TimeCost {
+    process_get_headers: Duration,
+    process_send_headers: Duration,
+    process_get_blocks: Duration,
+    process_send_block: Duration,
+    process_in_ibd: Duration,
+}
+
 /// Sync protocol handle
 #[derive(Clone)]
 pub struct Synchronizer {
@@ -222,6 +232,7 @@ pub struct Synchronizer {
     /// Sync shared state
     pub shared: Arc<SyncShared>,
     fetch_channel: Option<channel::Sender<FetchCMD>>,
+    time_cost: TimeCost,
 }
 
 impl Synchronizer {
@@ -233,6 +244,7 @@ impl Synchronizer {
             chain,
             shared,
             fetch_channel: None,
+            time_cost: TimeCost::default(),
         }
     }
 
@@ -242,35 +254,58 @@ impl Synchronizer {
     }
 
     fn try_process(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'_>,
     ) -> Status {
+        let start_time = std::time::Instant::now();
         match message {
             packed::SyncMessageUnionReader::GetHeaders(reader) => {
-                GetHeadersProcess::new(reader, self, peer, nc).execute()
+                let result = GetHeadersProcess::new(reader, self, peer, nc).execute();
+                self.time_cost
+                    .process_get_headers
+                    .add_assign(start_time.elapsed());
+                result
             }
             packed::SyncMessageUnionReader::SendHeaders(reader) => {
-                HeadersProcess::new(reader, self, peer, nc).execute()
+                let result = HeadersProcess::new(reader, self, peer, nc).execute();
+                self.time_cost
+                    .process_send_headers
+                    .add_assign(start_time.elapsed());
+                result
             }
             packed::SyncMessageUnionReader::GetBlocks(reader) => {
-                GetBlocksProcess::new(reader, self, peer, nc).execute()
+                let result = GetBlocksProcess::new(reader, self, peer, nc).execute();
+                self.time_cost
+                    .process_get_blocks
+                    .add_assign(start_time.elapsed());
+                result
             }
             packed::SyncMessageUnionReader::SendBlock(reader) => {
-                if reader.check_data() {
-                    BlockProcess::new(reader, self, peer).execute()
+                let result = if reader.check_data() {
+                    BlockProcess::new(reader, self, peer).execute(&self.time_cost)
                 } else {
                     StatusCode::ProtocolMessageIsMalformed.with_context("SendBlock is invalid")
-                }
+                };
+                self.time_cost
+                    .process_send_block
+                    .add_assign(start_time.elapsed());
+                result
             }
-            packed::SyncMessageUnionReader::InIBD(_) => InIBDProcess::new(self, peer, nc).execute(),
+            packed::SyncMessageUnionReader::InIBD(_) => {
+                let result = InIBDProcess::new(self, peer, nc).execute();
+                self.time_cost
+                    .process_in_ibd
+                    .add_assign(start_time.elapsed());
+                result
+            }
             _ => StatusCode::ProtocolMessageIsMalformed.with_context("unexpected sync message"),
         }
     }
 
     fn process(
-        &self,
+        &mut self,
         nc: &dyn CKBProtocolContext,
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'_>,
