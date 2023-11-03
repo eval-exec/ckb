@@ -205,6 +205,7 @@ struct TimeCost {
     db_commit: Duration,
     resolve_block_transactions: Duration,
     non_contextual_block_verifier: Duration,
+    until_non_contextual_block_verifier: Duration,
     contextual_block_verifier: Duration,
     verify_script: Duration,
 }
@@ -408,10 +409,15 @@ impl ChainService {
         }
         // non-contextual verify
         if !switch.disable_non_contextual() {
+            let start_time = std::time::Instant::now();
             self.non_contextual_verify(&block)?;
+            self.time_cost
+                .non_contextual_block_verifier
+                .add_assign(start_time.elapsed());
         }
+
         self.time_cost
-            .non_contextual_block_verifier
+            .until_non_contextual_block_verifier
             .add_assign(start_time.elapsed());
 
         let mut total_difficulty = U256::zero();
