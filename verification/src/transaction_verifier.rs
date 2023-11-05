@@ -5,6 +5,7 @@ use ckb_chain_spec::consensus::Consensus;
 use ckb_dao::DaoCalculator;
 use ckb_dao_utils::DaoError;
 use ckb_error::Error;
+use ckb_logger::info;
 use ckb_script::{TransactionScriptsVerifier, TransactionSnapshot, TransactionState, VerifyResult};
 use ckb_traits::{
     CellDataProvider, EpochProvider, ExtensionProvider, HeaderFieldsProvider, HeaderProvider,
@@ -256,12 +257,19 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + EpochProvider> 
 
     fn transaction_fee(&self) -> Result<Capacity, DaoError> {
         // skip tx fee calculation for cellbase
-        if self.transaction.is_cellbase() {
-            Ok(Capacity::zero())
-        } else {
-            DaoCalculator::new(self.consensus.as_ref(), &self.data_loader)
-                .transaction_fee(&self.transaction)
-        }
+        let result = {
+            if self.transaction.is_cellbase() {
+                Ok(Capacity::zero())
+            } else {
+                DaoCalculator::new(self.consensus.as_ref(), &self.data_loader)
+                    .transaction_fee(&self.transaction)
+            }
+        };
+        info!(
+            "FeeCalculator::Treansaction_fee: transaction: {:?}, result: {:?}",
+            self.transaction, result
+        );
+        result
     }
 }
 

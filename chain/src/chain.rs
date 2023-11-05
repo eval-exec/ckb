@@ -889,6 +889,11 @@ impl ChainService {
                 .iter()
                 .map(|entry| (entry.fee, entry.cycles))
                 .unzip();
+
+            info!(
+                "insert_ok_ext: block_hash: {}, txs_fees={:?}, cycles={:?}",
+                hash, &txs_fees, &cycles
+            );
             ext.txs_fees = txs_fees;
             ext.cycles = Some(cycles);
         }

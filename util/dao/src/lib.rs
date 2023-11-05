@@ -13,6 +13,7 @@ use ckb_types::{
     packed::{Byte32, CellOutput, Script, WitnessArgs},
     prelude::*,
 };
+use log::info;
 use std::collections::HashSet;
 
 #[cfg(test)]
@@ -149,6 +150,10 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
     /// Returns the total transactions fee of `rtx`.
     pub fn transaction_fee(&self, rtx: &ResolvedTransaction) -> Result<Capacity, DaoError> {
         let maximum_withdraw = self.transaction_maximum_withdraw(rtx)?;
+        info!(
+            "DaoCalculator::transaction_fee: rtx {:?}, maximum_withdraw: {:?}",
+            rtx, maximum_withdraw,
+        );
         rtx.transaction
             .outputs_capacity()
             .and_then(|y| maximum_withdraw.safe_sub(y))

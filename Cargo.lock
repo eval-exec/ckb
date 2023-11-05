@@ -672,6 +672,7 @@ dependencies = [
  "ckb-store",
  "ckb-traits",
  "ckb-types",
+ "log",
  "tempfile",
 ]
 
@@ -1543,6 +1544,7 @@ dependencies = [
  "ckb-dao",
  "ckb-dao-utils",
  "ckb-error",
+ "ckb-logger",
  "ckb-pow",
  "ckb-resource",
  "ckb-script",

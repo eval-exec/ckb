@@ -14,6 +14,7 @@ ckb-types = { path = "../types", version = "= 0.111.0" }
 ckb-chain-spec = { path = "../../spec", version = "= 0.111.0" }
 ckb-dao-utils = { path = "./utils", version = "= 0.111.0" }
 ckb-traits = { path = "../../traits", version = "= 0.111.0" }
+log = "0.4.17"
 
 [dev-dependencies]
 ckb-db = { path = "../../db", version = "= 0.111.0" }
