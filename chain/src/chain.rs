@@ -327,6 +327,10 @@ impl ChainService {
         // Currently, we only move the target tip header here, we don't delete the block for performance
         // TODO: delete the blocks if we need in the future
 
+        for block in fork.detached_blocks().iter().rev() {
+            db_txn.delete_block(block)?;
+        }
+
         db_txn.commit()?;
 
         self.update_proposal_table(&fork);
