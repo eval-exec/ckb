@@ -15,6 +15,7 @@ use ckb_db_schema::{
 };
 use ckb_error::Error;
 use ckb_freezer::Freezer;
+use ckb_logger::info;
 use ckb_merkle_mountain_range::{Error as MMRError, MMRStore, Result as MMRResult};
 use ckb_types::{
     core::{
@@ -332,6 +333,7 @@ impl StoreTransaction {
     ) -> Result<(), Error> {
         for (out_point, cell, cell_data) in cells {
             let key = out_point.to_cell_key();
+            info!("StoreTransaction::insert_cells :{:?}", cell.output());
             self.insert_raw(COLUMN_CELL, &key, cell.as_slice())?;
             if let Some(data) = cell_data {
                 self.insert_raw(COLUMN_CELL_DATA, &key, data.as_slice())?;

@@ -1368,6 +1368,7 @@ dependencies = [
  "ckb-db-schema",
  "ckb-error",
  "ckb-freezer",
+ "ckb-logger",
  "ckb-merkle-mountain-range",
  "ckb-traits",
  "ckb-types",
