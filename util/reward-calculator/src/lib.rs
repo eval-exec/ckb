@@ -210,10 +210,12 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
         };
 
         let txs_fees_proc = |hash: &Byte32| -> Vec<Capacity> {
-            store
+            let txs_fees = store
                 .get_block_ext(hash)
                 .expect("block ext stored")
-                .txs_fees
+                .txs_fees;
+            info!("txs_fees_proc(): hash: {}, txs_fees: {:?}", hash, txs_fees);
+            txs_fees
         };
 
         let committed_idx = committed_idx_proc(&index.hash());
