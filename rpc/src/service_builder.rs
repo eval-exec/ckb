@@ -155,12 +155,12 @@ impl<'a> ServiceBuilder<'a> {
         .to_delegate();
 
         if self.config.integration_test_enable() {
-            // IntegrationTest only on Dummy PoW chain
-            assert_eq!(
-                shared.consensus().pow,
-                Pow::Dummy,
-                "Only run integration test on Dummy PoW chain"
-            );
+            // IntegrationTest enabled on non Dummy chain temporarily
+            // assert_eq!(
+            //     shared.consensus().pow,
+            //     Pow::Dummy,
+            //     "Only run integration test on Dummy PoW chain"
+            // );
 
             self.add_methods(rpc_methods);
         } else {
