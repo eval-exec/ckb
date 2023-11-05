@@ -3,7 +3,7 @@
 use ckb_chain_spec::consensus::Consensus;
 use ckb_dao::DaoCalculator;
 use ckb_dao_utils::DaoError;
-use ckb_logger::debug;
+use ckb_logger::{debug, info};
 use ckb_store::ChainStore;
 use ckb_types::{
     core::{BlockReward, Capacity, CapacityResult, HeaderView},
@@ -51,6 +51,10 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
             .consensus
             .finalize_target(block_number)
             .expect("block number checked before involving finalize_target");
+        info!(
+            "RewardCalculator::block_reward_to_finalize: block_number: {}, target_number: {}, parent: {:?}",
+            block_number, target_number, parent,
+        );
         let target = self
             .store
             .get_block_hash(target_number)
@@ -179,6 +183,9 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
         let block_number = parent.number() + 1;
         let store = self.store;
 
+        info!("proposal_reward(): block_number: {}, target.number: {}, target.hash: {}, target_proposals: {:?}, proposal_window: {:?}, proposer_ratio: {:?}",
+            block_number, target.number(), target.hash(), target_proposals, proposal_window, proposer_ratio);
+
         let mut reward = Capacity::zero();
 
         // Transaction can be committed at height H(c): H(c) > H(w_close)
@@ -186,6 +193,7 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
             block_number.saturating_sub(proposal_window.length()),
             1 + proposal_window.closest(),
         );
+        info!("competing_commit_start: {}", competing_commit_start);
 
         let mut proposed: HashSet<ProposalShortId> = HashSet::new();
         let mut index = parent.to_owned();
@@ -222,6 +230,8 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
                 // target block is the earliest block with effective proposals for the parent block
                 if target_proposals.remove(&id) {
                     reward = reward.safe_add(tx_fee.safe_mul_ratio(proposer_ratio)?)?;
+                    info!("proposal_reward(), if has_committed: reward: {}, id: {}, tx_fee: {}, proposer_ratio: {:?}",
+                        reward, id, tx_fee, proposer_ratio);
                 }
             }
         }
@@ -255,6 +265,11 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
                 {
                     if target_proposals.remove(&id) && !proposed.contains(&id) {
                         reward = reward.safe_add(tx_fee.safe_mul_ratio(proposer_ratio)?)?;
+                        info!("proposal_reward(), while index.number(): {} > competing_commit_start: {}, target_proposals: {}",
+                            index.number(), competing_commit_start, target_proposals.len()
+                        );
+                        info!("proposal_reward(), if has_committed: reward: {}, id: {}, tx_fee: {}, proposer_ratio: {:?}",
+                            reward, id, tx_fee, proposer_ratio);
                     }
                 }
             }

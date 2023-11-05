@@ -7,7 +7,7 @@ use ckb_chain_spec::{
 use ckb_dao::DaoCalculator;
 use ckb_dao_utils::DaoError;
 use ckb_error::{Error, InternalErrorKind};
-use ckb_logger::error_target;
+use ckb_logger::{error_target, info};
 use ckb_merkle_mountain_range::MMRStore;
 use ckb_reward_calculator::RewardCalculator;
 use ckb_store::{data_loader_wrapper::AsDataLoader, ChainStore};
@@ -243,6 +243,7 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
     #[allow(clippy::int_plus_one)]
     pub fn verify(&self) -> Result<(), Error> {
         let cellbase = &self.resolved[0];
+        info!("RewardVerifier::veirfy cellbase: {:?}", cellbase);
         let no_finalization_target =
             (self.parent.number() + 1) <= self.context.consensus.finalization_delay_length();
 
@@ -264,6 +265,11 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer> RewardVerifier<'a, 'b, CS> {
 
         if !insufficient_reward_to_create_cell {
             if cellbase.transaction.outputs_capacity()? != block_reward.total {
+                info!(
+                    "cellbase.transaction.outputs_capacity: {:?}, block_reward: {:?}",
+                    cellbase.transaction.outputs_capacity(),
+                    block_reward
+                );
                 return Err((CellbaseError::InvalidRewardAmount).into());
             }
             if cellbase
