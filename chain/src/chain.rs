@@ -328,6 +328,7 @@ impl ChainService {
         // TODO: delete the blocks if we need in the future
 
         for block in fork.detached_blocks().iter().rev() {
+            db_txn.delete_block_ext(&block.hash())?;
             db_txn.delete_block(block)?;
         }
 
