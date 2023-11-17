@@ -43,6 +43,8 @@ members = [
     "util/runtime",
     "util/stop-handler",
     "util/metrics",
+    "util/migrate/migration-template",
+    "util/migrate",
     "util/metrics-service",
     "util/fixed-hash",
     "util/occupied-capacity",
@@ -86,7 +88,6 @@ members = [
     "sync",
     "util/instrument",
     "rpc",
-    "util/launcher/migration-template",
     "util/light-client-protocol-server",
     "util/launcher",
     "ckb-bin"
