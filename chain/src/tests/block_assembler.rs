@@ -21,7 +21,6 @@ use ckb_types::{
 };
 use ckb_verification::{BlockVerifier, HeaderVerifier};
 use ckb_verification_traits::{Switch, Verifier};
-use lazy_static::lazy_static;
 use std::sync::Arc;
 
 fn start_chain(consensus: Option<Consensus>) -> (ChainController, Shared) {
@@ -52,20 +51,6 @@ fn start_chain(consensus: Option<Consensus>) -> (ChainController, Shared) {
     let chain_service = ChainService::new(shared.clone(), pack.take_proposal_table());
     let chain_controller = chain_service.start::<&str>(None);
     (chain_controller, shared)
-}
-
-lazy_static! {
-    static ref BASIC_BLOCK_SIZE: u64 = {
-        let (_chain_controller, shared) = start_chain(None);
-
-        let block_template = shared
-            .get_block_template(None, None, None)
-            .unwrap()
-            .unwrap();
-
-        let block: Block = block_template.into();
-        block.serialized_size_without_uncle_proposals() as u64
-    };
 }
 
 #[test]
