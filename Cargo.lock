@@ -629,7 +629,6 @@ dependencies = [
  "ckb-verification-contextual",
  "ckb-verification-traits",
  "faux",
- "lazy_static",
  "tempfile",
 ]
 
