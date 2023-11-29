@@ -1156,6 +1156,7 @@ impl SyncShared {
 
     // Only used by unit test
     // Blocking insert a new block, return the verify result
+    #[cfg(test)]
     pub(crate) fn blocking_insert_new_block(
         &self,
         chain: &ChainController,
