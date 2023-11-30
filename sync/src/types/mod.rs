@@ -990,6 +990,7 @@ pub struct SyncShared {
 }
 
 impl SyncShared {
+    /// Create a SyncShared
     pub fn new(
         shared: Shared,
         sync_config: SyncConfig,
@@ -1056,6 +1057,7 @@ impl SyncShared {
         self.shared.consensus()
     }
 
+    /// Insert new block with callback
     pub fn insert_new_block_with_callback(
         &self,
         chain: &ChainController,
@@ -1267,6 +1269,7 @@ impl SyncShared {
         self.store().get_block_epoch(hash)
     }
 
+    /// Insert peer's unknown_header_list
     pub fn insert_peer_unknown_header_list(&self, pi: PeerIndex, header_list: Vec<Byte32>) {
         // update peer's unknown_header_list only once
         if self.state().peers.unknown_header_list_is_empty(pi) {
@@ -1285,7 +1288,7 @@ impl SyncShared {
         }
     }
 
-    // Return true when the block is that we have requested and received first time.
+    /// Return true when the block is that we have requested and received first time.
     pub fn new_block_received(&self, block: &core::BlockView) -> bool {
         if !self
             .state()
