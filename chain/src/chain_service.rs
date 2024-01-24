@@ -4,8 +4,8 @@
 use crate::consume_unverified::ConsumeUnverifiedBlocks;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
 use crate::{
-    tell_synchronizer_to_punish_the_bad_peer, ChainController, LonelyBlockHashWithCallback,
-    LonelyBlockWithCallback, ProcessBlockRequest,
+    tell_synchronizer_to_punish_the_bad_peer, ChainController, LonelyBlockWithCallback,
+    ProcessBlockRequest, UnverifiedBlock,
 };
 use ckb_channel::{self as channel, select, Receiver, SendError, Sender};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
@@ -20,6 +20,7 @@ use ckb_stop_handler::{new_crossbeam_exit_rx, register_thread};
 use ckb_types::core::{service::Request, BlockView};
 use ckb_verification::{BlockVerifier, NonContextualBlockTxsVerifier};
 use ckb_verification_traits::Verifier;
+use dashmap::DashMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -32,13 +33,16 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
 
     let (unverified_queue_stop_tx, unverified_queue_stop_rx) = ckb_channel::bounded::<()>(1);
     let (unverified_tx, unverified_rx) =
-        channel::bounded::<LonelyBlockHashWithCallback>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
+        channel::bounded::<UnverifiedBlock>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
+
+    let unverified_info = Arc::new(DashMap::new());
 
     let consumer_unverified_thread = thread::Builder::new()
-        .name("consume_unverified_blocks".into())
+        .name("consume_unverified_block".into())
         .spawn({
             let shared = builder.shared.clone();
             let verify_failed_blocks_tx = builder.verify_failed_blocks_tx.clone();
+            let unverified_info = Arc::clone(&unverified_info);
             move || {
                 let consume_unverified = ConsumeUnverifiedBlocks::new(
                     shared,
@@ -46,6 +50,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
                     truncate_block_rx,
                     builder.proposal_table,
                     verify_failed_blocks_tx,
+                    unverified_info,
                     unverified_queue_stop_rx,
                 );
 
@@ -73,6 +78,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
                     unverified_tx,
                     lonely_block_rx,
                     verify_failed_block_tx,
+                    unverified_info,
                     search_orphan_pool_stop_rx,
                 );
                 consume_orphan.start();

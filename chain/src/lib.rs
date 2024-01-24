@@ -82,38 +82,6 @@ pub struct LonelyBlockHash {
 }
 
 /// LonelyBlockWithCallback Combine LonelyBlock with an optional verify_callback
-pub struct LonelyBlockHashWithCallback {
-    /// The LonelyBlock
-    pub lonely_block: LonelyBlockHash,
-    /// The optional verify_callback
-    pub verify_callback: Option<VerifyCallback>,
-}
-
-impl LonelyBlockHashWithCallback {
-    pub(crate) fn execute_callback(self, verify_result: VerifyResult) {
-        if let Some(verify_callback) = self.verify_callback {
-            verify_callback(verify_result);
-        }
-    }
-}
-
-impl From<LonelyBlockWithCallback> for LonelyBlockHashWithCallback {
-    fn from(val: LonelyBlockWithCallback) -> Self {
-        LonelyBlockHashWithCallback {
-            lonely_block: LonelyBlockHash {
-                block_number_and_hash: BlockNumberAndHash {
-                    number: val.lonely_block.block.number(),
-                    hash: val.lonely_block.block.hash(),
-                },
-                peer_id: val.lonely_block.peer_id,
-                switch: val.lonely_block.switch,
-            },
-            verify_callback: val.verify_callback,
-        }
-    }
-}
-
-/// LonelyBlockWithCallback Combine LonelyBlock with an optional verify_callback
 pub struct LonelyBlockWithCallback {
     /// The LonelyBlock
     pub lonely_block: LonelyBlock,
@@ -169,6 +137,12 @@ impl UnverifiedBlock {
     pub fn execute_callback(self, verify_result: VerifyResult) {
         self.unverified_block.execute_callback(verify_result)
     }
+}
+
+pub(crate) struct UnverifiedInfo {
+    peer_id: Option<PeerIndex>,
+    switch: Option<Switch>,
+    verify_callback: Option<VerifyCallback>,
 }
 
 pub(crate) struct GlobalIndex {

@@ -1,10 +1,10 @@
 use crate::utils::orphan_block_pool::OrphanBlockPool;
 use crate::{
-    tell_synchronizer_to_punish_the_bad_peer, LonelyBlockHashWithCallback, LonelyBlockWithCallback,
-    VerifyResult,
+    tell_synchronizer_to_punish_the_bad_peer, LonelyBlockWithCallback, UnverifiedBlock,
+    UnverifiedInfo,
 };
-use ckb_channel::{select, Receiver, SendError, Sender};
-use ckb_error::{Error, InternalErrorKind};
+use ckb_channel::{select, Receiver, Sender};
+use ckb_error::Error;
 use ckb_logger::internal::trace;
 use ckb_logger::{debug, error, info};
 use ckb_shared::block_status::BlockStatus;
@@ -13,13 +13,16 @@ use ckb_shared::Shared;
 use ckb_store::ChainStore;
 use ckb_systemtime::unix_time_as_millis;
 use ckb_types::core::{BlockExt, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView};
+use ckb_types::packed::Byte32;
 use ckb_types::U256;
 use ckb_verification::InvalidParentError;
+use dashmap::DashMap;
 use std::sync::Arc;
 
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
-    pub unverified_blocks_tx: Sender<LonelyBlockHashWithCallback>,
+    pub unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
+    pub unverified_blocks_tx: Sender<UnverifiedBlock>,
 
     pub verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
 }
@@ -96,34 +99,18 @@ pub fn store_unverified_block(
 }
 
 impl ConsumeDescendantProcessor {
-    fn send_unverified_block(
-        &self,
-        lonely_block: LonelyBlockHashWithCallback,
-        total_difficulty: U256,
-    ) {
-        let block_number = lonely_block.lonely_block.block_number_and_hash.number();
-        let block_hash = lonely_block.lonely_block.block_number_and_hash.hash();
+    fn send_unverified_block(&self, lonely_block: LonelyBlockWithCallback, total_difficulty: U256) {
+        let block_number = lonely_block.lonely_block.block.number();
+        let block_hash = lonely_block.lonely_block.block.hash();
 
-        match self.unverified_blocks_tx.send(lonely_block) {
-            Ok(_) => {
-                debug!(
-                    "process desendant block success {}-{}",
-                    block_number, block_hash
-                );
-            }
-            Err(SendError(lonely_block)) => {
-                error!("send unverified_block_tx failed, the receiver has been closed");
-                let err: Error = InternalErrorKind::System
-                    .other(
-                        "send unverified_block_tx failed, the receiver have been close".to_string(),
-                    )
-                    .into();
-
-                let verify_result: VerifyResult = Err(err);
-                lonely_block.execute_callback(verify_result);
-                return;
-            }
-        };
+        self.unverified_info.insert(
+            block_hash.clone(),
+            UnverifiedInfo {
+                peer_id: lonely_block.lonely_block.peer_id,
+                switch: lonely_block.lonely_block.switch,
+                verify_callback: lonely_block.verify_callback,
+            },
+        );
 
         if total_difficulty.gt(self.shared.get_unverified_tip().total_difficulty()) {
             self.shared.set_unverified_tip(ckb_shared::HeaderIndex::new(
@@ -157,9 +144,7 @@ impl ConsumeDescendantProcessor {
                 self.shared
                     .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
 
-                let lonely_block_hash: LonelyBlockHashWithCallback = lonely_block.into();
-
-                self.send_unverified_block(lonely_block_hash, total_difficulty)
+                self.send_unverified_block(lonely_block, total_difficulty)
             }
 
             Err(err) => {
@@ -203,9 +188,10 @@ impl ConsumeOrphan {
     pub(crate) fn new(
         shared: Shared,
         orphan_block_pool: Arc<OrphanBlockPool>,
-        unverified_blocks_tx: Sender<LonelyBlockHashWithCallback>,
+        unverified_blocks_tx: Sender<UnverifiedBlock>,
         lonely_blocks_rx: Receiver<LonelyBlockWithCallback>,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
+        unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
         stop_rx: Receiver<()>,
     ) -> ConsumeOrphan {
         ConsumeOrphan {
@@ -214,6 +200,7 @@ impl ConsumeOrphan {
                 shared,
                 unverified_blocks_tx,
                 verify_failed_blocks_tx,
+                unverified_info,
             },
             orphan_blocks_broker: orphan_block_pool,
             lonely_blocks_rx,

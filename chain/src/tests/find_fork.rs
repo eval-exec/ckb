@@ -50,7 +50,7 @@ fn process_block(
         verify_callback: None,
         lonely_block: lonely_block_hash,
     };
-    consume_unverified_block_processor.consume_unverified_blocks(lonely_block_hash);
+    consume_unverified_block_processor.consume_unverified_block(lonely_block_hash);
 }
 
 // 0--1--2--3--4
@@ -90,11 +90,8 @@ fn test_find_fork_case1() {
         unverified_blocks_tx,
         verify_failed_blocks_tx: verify_failed_blocks_tx.clone(),
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-        verify_failed_blocks_tx,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table, verify_failed_blocks_tx);
 
     // fork1 total_difficulty 400
     for blk in fork1.blocks() {
@@ -183,11 +180,8 @@ fn test_find_fork_case2() {
         unverified_blocks_tx,
         verify_failed_blocks_tx: verify_failed_blocks_tx.clone(),
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-        verify_failed_blocks_tx,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table, verify_failed_blocks_tx);
 
     // fork1 total_difficulty 400
     for blk in fork1.blocks() {
@@ -277,11 +271,8 @@ fn test_find_fork_case3() {
         unverified_blocks_tx,
         verify_failed_blocks_tx: verify_failed_blocks_tx.clone(),
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-        verify_failed_blocks_tx,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table, verify_failed_blocks_tx);
     // fork1 total_difficulty 240
     for blk in fork1.blocks() {
         process_block(
@@ -369,11 +360,8 @@ fn test_find_fork_case4() {
         unverified_blocks_tx,
         verify_failed_blocks_tx: verify_failed_blocks_tx.clone(),
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-        verify_failed_blocks_tx,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table, verify_failed_blocks_tx);
 
     // fork1 total_difficulty 200
     for blk in fork1.blocks() {
@@ -462,11 +450,8 @@ fn repeatedly_switch_fork() {
         unverified_blocks_tx,
         verify_failed_blocks_tx: verify_failed_blocks_tx.clone(),
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-        verify_failed_blocks_tx,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table, verify_failed_blocks_tx);
 
     for blk in fork1.blocks() {
         process_block(

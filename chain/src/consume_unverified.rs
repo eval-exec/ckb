@@ -1,9 +1,11 @@
-use crate::LonelyBlockHashWithCallback;
 use crate::{
     tell_synchronizer_to_punish_the_bad_peer, utils::forkchanges::ForkChanges, GlobalIndex,
-    LonelyBlock, LonelyBlockWithCallback, TruncateRequest, UnverifiedBlock, VerifyResult,
+    LonelyBlock, LonelyBlockWithCallback, TruncateRequest, UnverifiedBlock, UnverifiedInfo,
+    VerifyResult,
 };
 use ckb_channel::{select, Receiver};
+use ckb_db::{DBIterator, Direction, IteratorMode, ReadOptions};
+use ckb_db_schema::COLUMN_NUMBER_HASH;
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::internal::{log_enabled, trace};
 use ckb_logger::Level::Trace;
@@ -11,7 +13,7 @@ use ckb_logger::{debug, error, info, log_enabled_target, trace_target};
 use ckb_merkle_mountain_range::leaf_index_to_mmr_size;
 use ckb_proposal_table::ProposalTable;
 use ckb_shared::block_status::BlockStatus;
-use ckb_shared::types::VerifyFailedBlockInfo;
+use ckb_shared::types::{BlockNumberAndHash, VerifyFailedBlockInfo};
 use ckb_shared::Shared;
 use ckb_store::{attach_block_cell, detach_block_cell, ChainStore, StoreTransaction};
 use ckb_systemtime::unix_time_as_millis;
@@ -21,17 +23,20 @@ use ckb_types::core::cell::{
 };
 use ckb_types::core::{service::Request, BlockExt, BlockNumber, BlockView, Cycle, HeaderView};
 use ckb_types::packed::Byte32;
+use ckb_types::prelude::{Entity, Pack, Unpack};
 use ckb_types::utilities::merkle_mountain_range::ChainRootMMR;
-use ckb_types::H256;
+use ckb_types::{packed, H256};
 use ckb_verification::cache::Completed;
 use ckb_verification::InvalidParentError;
 use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
 use ckb_verification_traits::Switch;
+use dashmap::DashMap;
 use std::cmp;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) struct ConsumeUnverifiedBlockProcessor {
+    unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
     pub(crate) shared: Shared,
     pub(crate) proposal_table: ProposalTable,
     pub(crate) verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
@@ -40,7 +45,7 @@ pub(crate) struct ConsumeUnverifiedBlockProcessor {
 pub(crate) struct ConsumeUnverifiedBlocks {
     tx_pool_controller: TxPoolController,
 
-    unverified_block_rx: Receiver<LonelyBlockHashWithCallback>,
+    unverified_block_rx: Receiver<UnverifiedBlock>,
     truncate_block_rx: Receiver<TruncateRequest>,
 
     stop_rx: Receiver<()>,
@@ -50,10 +55,11 @@ pub(crate) struct ConsumeUnverifiedBlocks {
 impl ConsumeUnverifiedBlocks {
     pub(crate) fn new(
         shared: Shared,
-        unverified_blocks_rx: Receiver<LonelyBlockHashWithCallback>,
+        unverified_blocks_rx: Receiver<UnverifiedBlock>,
         truncate_block_rx: Receiver<TruncateRequest>,
         proposal_table: ProposalTable,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
+        unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
         stop_rx: Receiver<()>,
     ) -> Self {
         ConsumeUnverifiedBlocks {
@@ -62,6 +68,7 @@ impl ConsumeUnverifiedBlocks {
             truncate_block_rx,
             stop_rx,
             processor: ConsumeUnverifiedBlockProcessor {
+                unverified_info,
                 shared,
                 proposal_table,
                 verify_failed_blocks_tx,
@@ -72,7 +79,12 @@ impl ConsumeUnverifiedBlocks {
     pub(crate) fn start(mut self) {
         loop {
             let _trace_begin_loop = minstant::Instant::now();
+            let check_unverified_ticker =
+                crossbeam::channel::tick(std::time::Duration::from_millis(100));
             select! {
+                recv(check_unverified_ticker) -> _msg => {
+                    self.processor.find_and_consume_unverified_block();
+                },
                 recv(self.unverified_block_rx) -> msg => match msg {
                     Ok(unverified_task) => {
                         // process this unverified block
@@ -82,7 +94,7 @@ impl ConsumeUnverifiedBlocks {
                         let _ = self.tx_pool_controller.suspend_chunk_process();
 
                         let _trace_now = minstant::Instant::now();
-                        self.processor.consume_unverified_blocks(unverified_task);
+                        self.processor.consume_unverified_block(unverified_task);
                         if let Some(handle) = ckb_metrics::handle() {
                             handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
                         }
@@ -106,7 +118,7 @@ impl ConsumeUnverifiedBlocks {
                     },
                 },
                 recv(self.stop_rx) -> _ => {
-                    info!("consume_unverified_blocks thread received exit signal, exit now");
+                    info!("consume_unverified_block thread received exit signal, exit now");
                     break;
                 }
 
@@ -116,14 +128,60 @@ impl ConsumeUnverifiedBlocks {
 }
 
 impl ConsumeUnverifiedBlockProcessor {
-    fn load_full_unverified_block(
-        &self,
-        lonely_block: LonelyBlockHashWithCallback,
-    ) -> UnverifiedBlock {
+    fn find_and_consume_unverified_block(&mut self) {
+        let tip = self.shared.snapshot().tip_number();
+        let unverified_tip = self.shared.get_unverified_tip();
+        if unverified_tip.number() <= tip {
+            return;
+        }
+
+        (tip + 1..=unverified_tip.number()).for_each(|unverified_block_number| {
+            for unverified_block in self.load_full_unverified_blocks(unverified_block_number) {
+                self.consume_unverified_block(unverified_block);
+            }
+        });
+    }
+
+    fn load_full_unverified_blocks(&self, block_number: BlockNumber) -> Vec<UnverifiedBlock> {
+        let number_and_hashes: Vec<BlockNumberAndHash> =
+            self.load_unverified_block_hashes(block_number);
+        let unverified_blocks: Vec<UnverifiedBlock> = number_and_hashes
+            .iter()
+            .map(|number_and_hash| self.load_full_unverified_block(number_and_hash.clone()))
+            .collect();
+        unverified_blocks
+    }
+
+    fn load_unverified_block_hashes(&self, block_number: BlockNumber) -> Vec<BlockNumberAndHash> {
+        let mut opts = ReadOptions::default();
+        opts.set_prefix_same_as_start(true);
+        let pack_number: packed::Uint64 = block_number.pack();
+        let prefix = pack_number.as_slice();
+
+        let number_and_hashes: Vec<BlockNumberAndHash> = self
+            .shared
+            .store()
+            .db()
+            .iter_opt(
+                COLUMN_NUMBER_HASH,
+                IteratorMode::From(prefix, Direction::Forward),
+                &opts,
+            )
+            .expect("db operation should be ok")
+            .map(|(packed_number_hash, _v)| {
+                let number_hash = packed::NumberHash::from_slice(&packed_number_hash)
+                    .expect("read number_hash should be ok");
+                BlockNumberAndHash::new(number_hash.number().unpack(), number_hash.block_hash())
+            })
+            .collect();
+        number_and_hashes
+    }
+
+    fn load_full_unverified_block(&self, number_and_hash: BlockNumberAndHash) -> UnverifiedBlock {
         let block_view = self
             .shared
             .store()
-            .get_block(&lonely_block.lonely_block.block_number_and_hash.hash())
+            .get_block(&number_and_hash.hash())
             .expect("block stored");
         let parent_header_view = self
             .shared
@@ -131,24 +189,36 @@ impl ConsumeUnverifiedBlockProcessor {
             .get_block_header(&block_view.data().header().raw().parent_hash())
             .expect("parent header stored");
 
-        UnverifiedBlock {
-            unverified_block: LonelyBlockWithCallback {
-                lonely_block: LonelyBlock {
-                    block: Arc::new(block_view),
-                    peer_id: lonely_block.lonely_block.peer_id,
-                    switch: lonely_block.lonely_block.switch,
+        if let Some((_block_hash, unverified_info)) =
+            self.unverified_info.remove(&number_and_hash.hash())
+        {
+            UnverifiedBlock {
+                unverified_block: LonelyBlockWithCallback {
+                    lonely_block: LonelyBlock {
+                        block: Arc::new(block_view),
+                        peer_id: unverified_info.peer_id,
+                        switch: unverified_info.switch,
+                    },
+                    verify_callback: unverified_info.verify_callback,
                 },
-                verify_callback: lonely_block.verify_callback,
-            },
-            parent_header: parent_header_view,
+                parent_header: parent_header_view,
+            }
+        } else {
+            return UnverifiedBlock {
+                unverified_block: LonelyBlockWithCallback {
+                    lonely_block: LonelyBlock {
+                        block: Arc::new(block_view),
+                        peer_id: None,
+                        switch: None,
+                    },
+                    verify_callback: None,
+                },
+                parent_header: parent_header_view,
+            };
         }
     }
 
-    pub(crate) fn consume_unverified_blocks(
-        &mut self,
-        lonely_block_hash: LonelyBlockHashWithCallback,
-    ) {
-        let unverified_block = self.load_full_unverified_block(lonely_block_hash);
+    pub(crate) fn consume_unverified_block(&mut self, unverified_block: UnverifiedBlock) {
         // process this unverified block
         let verify_result = self.verify_block(
             unverified_block.block(),
