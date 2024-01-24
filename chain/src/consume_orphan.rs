@@ -1,21 +1,26 @@
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{LonelyBlock, LonelyBlockHash, VerifyResult};
-use ckb_channel::{select, Receiver, SendError, Sender};
-use ckb_error::{Error, InternalErrorKind};
+use crate::{LonelyBlock, LonelyBlockHash, UnverifiedInfo};
+use ckb_channel::{select, Receiver};
+use ckb_error::Error;
 use ckb_logger::internal::trace;
 use ckb_logger::{debug, error, info};
 use ckb_shared::block_status::BlockStatus;
 use ckb_shared::Shared;
 use ckb_store::ChainStore;
 use ckb_systemtime::unix_time_as_millis;
-use ckb_types::core::{BlockExt, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView};
+use ckb_types::core::{
+    BlockExt, BlockNumber, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView,
+};
+use ckb_types::packed::Byte32;
 use ckb_types::U256;
 use ckb_verification::InvalidParentError;
+use dashmap::DashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
-    pub unverified_blocks_tx: Sender<LonelyBlockHash>,
+    pub unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
 }
 
 // Store the an unverified block to the database. We may usually do this
@@ -90,35 +95,19 @@ pub fn store_unverified_block(
 }
 
 impl ConsumeDescendantProcessor {
-    fn send_unverified_block(&self, lonely_block: LonelyBlockHash, total_difficulty: U256) {
+    // set unverified_tip to the block if its total difficulty is higher than current unverified_tip
+    fn set_unverified_block(&self, lonely_block: LonelyBlockHash, total_difficulty: U256) {
         let block_number = lonely_block.block_number_and_hash.number();
         let block_hash = lonely_block.block_number_and_hash.hash();
-        ckb_metrics::handle().map(|metrics| {
-            metrics
-                .ckb_chain_unverified_block_ch_len
-                .set(self.unverified_blocks_tx.len() as i64)
-        });
 
-        match self.unverified_blocks_tx.send(lonely_block) {
-            Ok(_) => {
-                debug!(
-                    "process desendant block success {}-{}",
-                    block_number, block_hash
-                );
-            }
-            Err(SendError(lonely_block)) => {
-                error!("send unverified_block_tx failed, the receiver has been closed");
-                let err: Error = InternalErrorKind::System
-                    .other(
-                        "send unverified_block_tx failed, the receiver have been close".to_string(),
-                    )
-                    .into();
-
-                let verify_result: VerifyResult = Err(err);
-                lonely_block.execute_callback(verify_result);
-                return;
-            }
-        };
+        self.unverified_info
+            .entry(block_number)
+            .or_default()
+            .entry(block_hash.clone())
+            .or_insert(UnverifiedInfo {
+                switch: lonely_block.switch,
+                verify_callback: lonely_block.verify_callback,
+            });
 
         if total_difficulty.gt(self.shared.get_unverified_tip().total_difficulty()) {
             self.shared.set_unverified_tip(ckb_shared::HeaderIndex::new(
@@ -149,12 +138,12 @@ impl ConsumeDescendantProcessor {
     pub(crate) fn process_descendant(&self, lonely_block: LonelyBlock) {
         match store_unverified_block(&self.shared, lonely_block.block().to_owned()) {
             Ok((_parent_header, total_difficulty)) => {
+                let block_hash = lonely_block.block().hash();
                 self.shared
-                    .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
+                    .insert_block_status(block_hash.clone(), BlockStatus::BLOCK_STORED);
 
-                let lonely_block_hash: LonelyBlockHash = lonely_block.into();
-
-                self.send_unverified_block(lonely_block_hash, total_difficulty)
+                self.set_unverified_block(lonely_block.into(), total_difficulty);
+                self.shared.remove_header_view(&block_hash);
             }
 
             Err(err) => {
@@ -191,15 +180,15 @@ impl ConsumeOrphan {
     pub(crate) fn new(
         shared: Shared,
         orphan_block_pool: Arc<OrphanBlockPool>,
-        unverified_blocks_tx: Sender<LonelyBlockHash>,
         lonely_blocks_rx: Receiver<LonelyBlock>,
+        unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
         stop_rx: Receiver<()>,
     ) -> ConsumeOrphan {
         ConsumeOrphan {
             shared: shared.clone(),
             descendant_processor: ConsumeDescendantProcessor {
                 shared,
-                unverified_blocks_tx,
+                unverified_info,
             },
             orphan_blocks_broker: orphan_block_pool,
             lonely_blocks_rx,
