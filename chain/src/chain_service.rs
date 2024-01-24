@@ -1,8 +1,9 @@
 //! CKB chain service.
 #![allow(missing_docs)]
 
+use crate::consume_orphan::ConsumeOrphan;
 use crate::{LonelyBlock, ProcessBlockRequest};
-use ckb_channel::{select, Receiver, Sender};
+use ckb_channel::{select, Receiver};
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::{self, debug, error, info, warn};
 use ckb_shared::block_status::BlockStatus;
@@ -13,26 +14,25 @@ use ckb_verification::{BlockVerifier, NonContextualBlockTxsVerifier};
 use ckb_verification_traits::Verifier;
 
 /// Chain background service to receive LonelyBlock and only do `non_contextual_verify`
-#[derive(Clone)]
 pub(crate) struct ChainService {
     shared: Shared,
 
     process_block_rx: Receiver<ProcessBlockRequest>,
 
-    lonely_block_tx: Sender<LonelyBlock>,
+    consume_orphan: ConsumeOrphan,
 }
+
 impl ChainService {
     /// Create a new ChainService instance with shared.
     pub(crate) fn new(
         shared: Shared,
         process_block_rx: Receiver<ProcessBlockRequest>,
-
-        lonely_block_tx: Sender<LonelyBlock>,
+        consume_orphan: ConsumeOrphan,
     ) -> ChainService {
         ChainService {
             shared,
             process_block_rx,
-            lonely_block_tx,
+            consume_orphan,
         }
     }
 
@@ -126,26 +126,14 @@ impl ChainService {
                 return;
             }
         }
+        self.consume_orphan.process_lonely_block(lonely_block);
 
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics
-                .ckb_chain_lonely_block_ch_len
-                .set(self.lonely_block_tx.len() as i64)
-        }
-
-        match self.lonely_block_tx.send(lonely_block) {
-            Ok(_) => {
-                debug!(
-                    "processing block: {}-{}, (tip:unverified_tip):({}:{})",
-                    block_number,
-                    block_hash,
-                    self.shared.snapshot().tip_number(),
-                    self.shared.get_unverified_tip().number(),
-                );
-            }
-            Err(_) => {
-                error!("Failed to notify new block to orphan pool, It seems that the orphan pool has exited.");
-            }
-        }
+        debug!(
+            "processing block: {}-{}, (tip:unverified_tip):({}:{})",
+            block_number,
+            block_hash,
+            self.shared.snapshot().tip_number(),
+            self.shared.get_unverified_tip().number(),
+        );
     }
 }

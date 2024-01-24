@@ -1,5 +1,6 @@
-use crate::LonelyBlockHash;
-use crate::{utils::forkchanges::ForkChanges, GlobalIndex, TruncateRequest, VerifyResult};
+use crate::{
+    utils::forkchanges::ForkChanges, GlobalIndex, TruncateRequest, UnverifiedBlock, VerifyResult,
+};
 use ckb_channel::{select, Receiver};
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::internal::{log_enabled, trace};
@@ -18,7 +19,7 @@ use ckb_types::core::cell::{
 use ckb_types::core::{service::Request, BlockExt, BlockNumber, BlockView, Cycle, HeaderView};
 use ckb_types::packed::Byte32;
 use ckb_types::utilities::merkle_mountain_range::ChainRootMMR;
-use ckb_types::H256;
+use ckb_types::{H256, U256};
 use ckb_verification::cache::Completed;
 use ckb_verification::InvalidParentError;
 use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
@@ -35,7 +36,7 @@ pub(crate) struct ConsumeUnverifiedBlockProcessor {
 pub(crate) struct ConsumeUnverifiedBlocks {
     tx_pool_controller: TxPoolController,
 
-    unverified_block_rx: Receiver<LonelyBlockHash>,
+    unverified_block_rx: Receiver<UnverifiedBlock>,
     truncate_block_rx: Receiver<TruncateRequest>,
 
     stop_rx: Receiver<()>,
@@ -45,14 +46,14 @@ pub(crate) struct ConsumeUnverifiedBlocks {
 impl ConsumeUnverifiedBlocks {
     pub(crate) fn new(
         shared: Shared,
-        unverified_blocks_rx: Receiver<LonelyBlockHash>,
         truncate_block_rx: Receiver<TruncateRequest>,
         proposal_table: ProposalTable,
+        unverified_block_rx: Receiver<UnverifiedBlock>,
         stop_rx: Receiver<()>,
     ) -> Self {
         ConsumeUnverifiedBlocks {
             tx_pool_controller: shared.tx_pool_controller().to_owned(),
-            unverified_block_rx: unverified_blocks_rx,
+            unverified_block_rx,
             truncate_block_rx,
             stop_rx,
             processor: ConsumeUnverifiedBlockProcessor {
@@ -67,25 +68,12 @@ impl ConsumeUnverifiedBlocks {
             let _trace_begin_loop = minstant::Instant::now();
             select! {
                 recv(self.unverified_block_rx) -> msg => match msg {
-                    Ok(unverified_task) => {
-                        // process this unverified block
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_waiting_block_duration.observe(_trace_begin_loop.elapsed().as_secs_f64())
-                        }
-                        let _ = self.tx_pool_controller.suspend_chunk_process();
-
-                        let _trace_now = minstant::Instant::now();
-                        self.processor.consume_unverified_blocks(unverified_task);
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
-                        }
-
-                        let _ = self.tx_pool_controller.continue_chunk_process();
+                    Ok(unverified_block) => {
+                        self.processor.consume_unverified_block(unverified_block);
                     },
-                    Err(err) => {
-                        error!("unverified_block_rx err: {}", err);
-                        return;
-                    },
+                    Err(err) =>{
+                        error!("unverified_rx has been closed, err: {}", err);
+                    }
                 },
                 recv(self.truncate_block_rx) -> msg => match msg {
                     Ok(Request { responder, arguments: target_tip_hash }) => {
@@ -99,7 +87,7 @@ impl ConsumeUnverifiedBlocks {
                     },
                 },
                 recv(self.stop_rx) -> _ => {
-                    info!("consume_unverified_blocks thread received exit signal, exit now");
+                    info!("consume_unverified_block thread received exit signal, exit now");
                     break;
                 }
 
@@ -109,52 +97,28 @@ impl ConsumeUnverifiedBlocks {
 }
 
 impl ConsumeUnverifiedBlockProcessor {
-    fn load_unverified_block_and_parent_header(
-        &self,
-        block_hash: &Byte32,
-    ) -> (BlockView, HeaderView) {
-        let block_view = self
-            .shared
-            .store()
-            .get_block(block_hash)
-            .expect("block stored");
-        let parent_header_view = self
-            .shared
-            .store()
-            .get_block_header(&block_view.data().header().raw().parent_hash())
-            .expect("parent header stored");
+    pub(crate) fn consume_unverified_block(&mut self, unverified_block: UnverifiedBlock) {
+        let _trace_now = ckb_metrics::handle().map(|metrics| {
+            metrics
+                .ckb_chain_consume_unverified_block_duration
+                .start_timer()
+        });
 
-        (block_view, parent_header_view)
-    }
-
-    pub(crate) fn consume_unverified_blocks(&mut self, lonely_block_hash: LonelyBlockHash) {
-        let LonelyBlockHash {
-            block_number_and_hash,
+        let UnverifiedBlock {
+            block,
+            parent_header,
             switch,
             verify_callback,
-        } = lonely_block_hash;
-        let (unverified_block, parent_header) =
-            self.load_unverified_block_and_parent_header(&block_number_and_hash.hash);
+        } = unverified_block;
+
         // process this unverified block
-        let verify_result = self.verify_block(&unverified_block, &parent_header, switch);
+        let verify_result = self.verify_block(&block, &parent_header, switch);
         match &verify_result {
             Ok(_) => {
-                let log_now = std::time::Instant::now();
-                self.shared.remove_block_status(&block_number_and_hash.hash);
-                let log_elapsed_remove_block_status = log_now.elapsed();
-                self.shared.remove_header_view(&block_number_and_hash.hash);
-                debug!(
-                    "block {} remove_block_status cost: {:?}, and header_view cost: {:?}",
-                    block_number_and_hash.hash,
-                    log_elapsed_remove_block_status,
-                    log_now.elapsed()
-                );
+                self.shared.remove_block_status(&block.hash());
             }
             Err(err) => {
-                error!(
-                    "verify block {} failed: {}",
-                    block_number_and_hash.hash, err
-                );
+                error!("verify block {} failed: {}", block.hash(), err);
 
                 let tip = self
                     .shared
@@ -174,12 +138,12 @@ impl ConsumeUnverifiedBlockProcessor {
                 ));
 
                 self.shared
-                    .insert_block_status(block_number_and_hash.hash(), BlockStatus::BLOCK_INVALID);
+                    .insert_block_status(block.hash(), BlockStatus::BLOCK_INVALID);
                 error!(
                     "set_unverified tip to {}-{}, because verify {} failed: {}",
                     tip.number(),
                     tip.hash(),
-                    block_number_and_hash.hash,
+                    block.hash(),
                     err
                 );
             }
@@ -238,6 +202,13 @@ impl ConsumeUnverifiedBlockProcessor {
             }
         }
 
+        let db_txn = Arc::new(self.shared.store().begin_transaction());
+        let txn_snapshot = db_txn.get_snapshot();
+        let _snapshot_tip_hash = db_txn.get_update_for_tip_hash(&txn_snapshot);
+
+        let mut total_difficulty = U256::zero();
+        let mut fork = ForkChanges::default();
+
         let cannon_total_difficulty =
             parent_ext.total_difficulty.to_owned() + block.header().difficulty();
 
@@ -247,6 +218,14 @@ impl ConsumeUnverifiedBlockProcessor {
             }
             .into());
         }
+
+        let next_block_epoch = self
+            .shared
+            .consensus()
+            .next_epoch_ext(&parent_header, &txn_snapshot.borrow_as_data_loader())
+            .expect("epoch should be stored");
+        let new_epoch = next_block_epoch.is_head();
+        let epoch = next_block_epoch.epoch();
 
         let ext = BlockExt {
             received_at: unix_time_as_millis(),
@@ -258,27 +237,26 @@ impl ConsumeUnverifiedBlockProcessor {
             txs_sizes: None,
         };
 
+        db_txn.insert_block_epoch_index(
+            &block.header().hash(),
+            &epoch.last_block_hash_in_previous_epoch(),
+        )?;
+        if new_epoch {
+            db_txn.insert_epoch_ext(&epoch.last_block_hash_in_previous_epoch(), &epoch)?;
+        }
+
         let shared_snapshot = Arc::clone(&self.shared.snapshot());
         let origin_proposals = shared_snapshot.proposals();
         let current_tip_header = shared_snapshot.tip_header();
+
         let current_total_difficulty = shared_snapshot.total_difficulty().to_owned();
+        debug!(
+            "Current difficulty = {:#x}, cannon = {:#x}",
+            current_total_difficulty, cannon_total_difficulty,
+        );
 
         // is_better_than
         let new_best_block = cannon_total_difficulty > current_total_difficulty;
-
-        let mut fork = ForkChanges::default();
-
-        let next_block_epoch = self
-            .shared
-            .consensus()
-            .next_epoch_ext(parent_header, &self.shared.store().borrow_as_data_loader())
-            .expect("epoch should be stored");
-        let new_epoch = next_block_epoch.is_head();
-        let epoch = next_block_epoch.epoch();
-
-        let db_txn = Arc::new(self.shared.store().begin_transaction());
-        let txn_snapshot = db_txn.get_snapshot();
-        let _snapshot_tip_hash = db_txn.get_update_for_tip_hash(&txn_snapshot);
 
         if new_best_block {
             info!(
@@ -293,17 +271,13 @@ impl ConsumeUnverifiedBlockProcessor {
 
             // update and verify chain root
             // MUST update index before reconcile_main_chain
-            let begin_reconcile_main_chain = std::time::Instant::now();
             self.reconcile_main_chain(Arc::clone(&db_txn), &mut fork, switch)?;
-            trace!(
-                "reconcile_main_chain cost {:?}",
-                begin_reconcile_main_chain.elapsed()
-            );
 
             db_txn.insert_tip_header(&block.header())?;
             if new_epoch || fork.has_detached() {
                 db_txn.insert_current_epoch_ext(&epoch)?;
             }
+            total_difficulty = cannon_total_difficulty.clone();
         } else {
             db_txn.insert_block_ext(&block.header().hash(), &ext)?;
         }
@@ -316,7 +290,7 @@ impl ConsumeUnverifiedBlockProcessor {
                 tip_header.number(),
                 tip_header.hash(),
                 tip_header.epoch(),
-                cannon_total_difficulty,
+                total_difficulty,
                 block.transactions().len()
             );
 
@@ -328,7 +302,7 @@ impl ConsumeUnverifiedBlockProcessor {
 
             let new_snapshot =
                 self.shared
-                    .new_snapshot(tip_header, cannon_total_difficulty, epoch, new_proposals);
+                    .new_snapshot(tip_header, total_difficulty, epoch, new_proposals);
 
             self.shared.store_snapshot(Arc::clone(&new_snapshot));
 

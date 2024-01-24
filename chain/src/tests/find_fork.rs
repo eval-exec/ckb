@@ -1,7 +1,7 @@
-use crate::consume_orphan::ConsumeDescendantProcessor;
+use crate::consume_orphan::ConsumeOrphan;
 use crate::consume_unverified::ConsumeUnverifiedBlockProcessor;
 use crate::utils::forkchanges::ForkChanges;
-use crate::{start_chain_services, LonelyBlock, LonelyBlockHash};
+use crate::{start_chain_services, LonelyBlock, LonelyBlockHash, UnverifiedBlock};
 use ckb_chain_spec::consensus::{Consensus, ProposalWindow};
 use ckb_proposal_table::ProposalTable;
 use ckb_shared::types::BlockNumberAndHash;
@@ -21,26 +21,27 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn process_block(
-    consume_descendant_processor: &ConsumeDescendantProcessor,
+    consume_orphan: &ConsumeOrphan,
     consume_unverified_block_processor: &mut ConsumeUnverifiedBlockProcessor,
     blk: &BlockView,
     switch: Switch,
 ) {
-    let lonely_block_hash = LonelyBlockHash {
-        switch: Some(switch),
-        block_number_and_hash: BlockNumberAndHash::new(blk.number(), blk.hash()),
-        verify_callback: None,
-    };
-
     let lonely_block = LonelyBlock {
         switch: Some(switch),
         block: Arc::new(blk.to_owned()),
         verify_callback: None,
     };
 
-    consume_descendant_processor.process_descendant(lonely_block);
+    let unverified_block = UnverifiedBlock {
+        block: Arc::clone(blk),
+        parent_header: (),
+        switch: None,
+        verify_callback: None,
+    };
 
-    consume_unverified_block_processor.consume_unverified_blocks(lonely_block_hash);
+    consume_orphan.process_descendant(lonely_block);
+
+    consume_unverified_block_processor.consume_unverified_block(lonely_block_hash);
 }
 
 // 0--1--2--3--4
@@ -76,10 +77,8 @@ fn test_find_fork_case1() {
         shared: shared.clone(),
         unverified_blocks_tx,
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(shared.clone(), proposal_table);
 
     // fork1 total_difficulty 400
     for blk in fork1.blocks() {
@@ -164,10 +163,8 @@ fn test_find_fork_case2() {
         shared: shared.clone(),
         unverified_blocks_tx,
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table);
 
     // fork1 total_difficulty 400
     for blk in fork1.blocks() {
@@ -253,10 +250,8 @@ fn test_find_fork_case3() {
         shared: shared.clone(),
         unverified_blocks_tx,
     };
-    let mut consume_unverified_block_processor = ConsumeUnverifiedBlockProcessor {
-        shared: shared.clone(),
-        proposal_table,
-    };
+    let mut consume_unverified_block_processor =
+        ConsumeUnverifiedBlockProcessor(_, shared.clone(), proposal_table);
     // fork1 total_difficulty 240
     for blk in fork1.blocks() {
         process_block(

@@ -2,10 +2,12 @@
 
 //! Bootstrap ChainService, ConsumeOrphan and ConsumeUnverified threads.
 use crate::chain_service::ChainService;
+use crate::consume_orphan::ConsumeOrphan;
 use crate::consume_unverified::ConsumeUnverifiedBlocks;
+use crate::fill_unverified_blocks_channel::FillUnverifiedBlocksChannel;
 use crate::init_load_unverified::InitLoadUnverified;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{ChainController, LonelyBlock, LonelyBlockHash};
+use crate::{ChainController, LonelyBlockHash, UnverifiedBlock};
 use ckb_channel::{self as channel, SendError};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
 use ckb_logger::warn;
@@ -22,20 +24,25 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
 
     let (truncate_block_tx, truncate_block_rx) = channel::bounded(1);
 
+    let (fill_unverified_stop_tx, fill_unverified_stop_rx) = ckb_channel::bounded::<()>(1);
+
     let (unverified_queue_stop_tx, unverified_queue_stop_rx) = ckb_channel::bounded::<()>(1);
-    let (unverified_tx, unverified_rx) =
-        channel::bounded::<LonelyBlockHash>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
+
+    let (fill_unverified_tx, fill_unverified_rx) = channel::unbounded::<LonelyBlockHash>();
+
+    let (unverified_block_tx, unverified_block_rx) =
+        channel::bounded::<UnverifiedBlock>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
 
     let consumer_unverified_thread = thread::Builder::new()
-        .name("consume_unverified_blocks".into())
+        .name("consume_unverified_block".into())
         .spawn({
             let shared = builder.shared.clone();
             move || {
                 let consume_unverified = ConsumeUnverifiedBlocks::new(
                     shared,
-                    unverified_rx,
                     truncate_block_rx,
                     builder.proposal_table,
+                    unverified_block_rx,
                     unverified_queue_stop_rx,
                 );
 
@@ -44,29 +51,22 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         })
         .expect("start unverified_queue consumer thread should ok");
 
-    let (lonely_block_tx, lonely_block_rx) =
-        channel::bounded::<LonelyBlock>(BLOCK_DOWNLOAD_WINDOW as usize);
 
-    let (search_orphan_pool_stop_tx, search_orphan_pool_stop_rx) = ckb_channel::bounded::<()>(1);
-
-    let search_orphan_pool_thread = thread::Builder::new()
-        .name("consume_orphan_blocks".into())
+    let fill_unverified_block_thread = thread::Builder::new()
+        .name("fill_unverified_block".into())
         .spawn({
-            let orphan_blocks_broker = Arc::clone(&orphan_blocks_broker);
             let shared = builder.shared.clone();
-            use crate::consume_orphan::ConsumeOrphan;
             move || {
-                let consume_orphan = ConsumeOrphan::new(
+                let fill_unverified_block = FillUnverifiedBlocksChannel::new(
                     shared,
-                    orphan_blocks_broker,
-                    unverified_tx,
-                    lonely_block_rx,
-                    search_orphan_pool_stop_rx,
+                    fill_unverified_rx,
+                    unverified_block_tx,
+                    fill_unverified_stop_rx,
                 );
-                consume_orphan.start();
+                fill_unverified_block.start()
             }
         })
-        .expect("start search_orphan_pool thread should ok");
+        .expect("start fill_unverified_block should ok");
 
     let (process_block_tx, process_block_rx) = channel::bounded(BLOCK_DOWNLOAD_WINDOW as usize);
 
@@ -75,7 +75,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
     let chain_controller = ChainController::new(
         process_block_tx,
         truncate_block_tx,
-        orphan_blocks_broker,
+        orphan_blocks_broker.clone(),
         Arc::clone(&is_verifying_unverified_blocks_on_startup),
     );
 
@@ -98,8 +98,14 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         })
         .expect("start unverified_queue consumer thread should ok");
 
+    let consume_orphan = ConsumeOrphan::new(
+        builder.shared.clone(),
+        orphan_blocks_broker,
+        fill_unverified_tx,
+    );
+
     let chain_service: ChainService =
-        ChainService::new(builder.shared, process_block_rx, lonely_block_tx);
+        ChainService::new(builder.shared, process_block_rx, consume_orphan);
     let chain_service_thread = thread::Builder::new()
         .name("ChainService".into())
         .spawn({
@@ -107,11 +113,11 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
                 chain_service.start_process_block();
 
                 let _ = init_load_unverified_thread.join();
-
-                if let Err(SendError(_)) = search_orphan_pool_stop_tx.send(()) {
-                    warn!("trying to notify search_orphan_pool thread to stop, but search_orphan_pool_stop_tx already closed")
+                
+                if let Err(_) = fill_unverified_stop_tx.send(()){
+                    warn!("trying to notify fill unverified thread to stop, but fill_unverified_stop_tx already closed");
                 }
-                let _ = search_orphan_pool_thread.join();
+                let _ = fill_unverified_block_thread.join();
 
                 if let Err(SendError(_)) = unverified_queue_stop_tx.send(()) {
                     warn!("trying to notify consume unverified thread to stop, but unverified_queue_stop_tx already closed");
