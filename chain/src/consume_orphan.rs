@@ -103,14 +103,14 @@ impl ConsumeDescendantProcessor {
         let block_number = lonely_block.lonely_block.block.number();
         let block_hash = lonely_block.lonely_block.block.hash();
 
-        self.unverified_info.insert(
-            block_hash.clone(),
-            UnverifiedInfo {
-                peer_id: lonely_block.lonely_block.peer_id,
-                switch: lonely_block.lonely_block.switch,
-                verify_callback: lonely_block.verify_callback,
-            },
-        );
+        // self.unverified_info.insert(
+        //     block_hash.clone(),
+        //     UnverifiedInfo {
+        //         peer_id: lonely_block.lonely_block.peer_id,
+        //         switch: lonely_block.lonely_block.switch,
+        //         verify_callback: lonely_block.verify_callback,
+        //     },
+        // );
 
         if total_difficulty.gt(self.shared.get_unverified_tip().total_difficulty()) {
             self.shared.set_unverified_tip(ckb_shared::HeaderIndex::new(
