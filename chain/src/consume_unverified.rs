@@ -145,6 +145,14 @@ impl ConsumeUnverifiedBlockProcessor {
     fn load_full_unverified_blocks(&self, block_number: BlockNumber) -> Vec<UnverifiedBlock> {
         let number_and_hashes: Vec<BlockNumberAndHash> =
             self.load_unverified_block_hashes(block_number);
+        info!(
+            "load block_hash for {} got {:?}",
+            block_number,
+            number_and_hashes
+                .iter()
+                .map(|x| (x.number(), x.hash()))
+                .collect::<Vec<_>>()
+        );
         let unverified_blocks: Vec<UnverifiedBlock> = number_and_hashes
             .iter()
             .map(|number_and_hash| self.load_full_unverified_block(number_and_hash.clone()))
@@ -173,6 +181,7 @@ impl ConsumeUnverifiedBlockProcessor {
                     .expect("read number_hash should be ok");
                 BlockNumberAndHash::new(number_hash.number().unpack(), number_hash.block_hash())
             })
+            .take_while(|number_hash| number_hash.number() == block_number)
             .collect();
         number_and_hashes
     }
