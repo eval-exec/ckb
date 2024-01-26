@@ -81,7 +81,7 @@ impl ConsumeUnverifiedBlocks {
         loop {
             let _trace_begin_loop = minstant::Instant::now();
             let check_unverified_ticker =
-                crossbeam::channel::tick(std::time::Duration::from_millis(100));
+                crossbeam::channel::tick(std::time::Duration::from_millis(10));
             select! {
                 recv(check_unverified_ticker) -> _msg => {
                     self.processor.find_and_consume_unverified_block();
@@ -94,11 +94,7 @@ impl ConsumeUnverifiedBlocks {
                         }
                         let _ = self.tx_pool_controller.suspend_chunk_process();
 
-                        let _trace_now = minstant::Instant::now();
                         self.processor.consume_unverified_block(unverified_task);
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
-                        }
 
                         let _ = self.tx_pool_controller.continue_chunk_process();
                     },
@@ -136,7 +132,10 @@ impl ConsumeUnverifiedBlockProcessor {
             return;
         }
 
-        (tip + 1..=unverified_tip.number()).for_each(|unverified_block_number| {
+        let start = tip + 1;
+        let end = cmp::min(start + 9, unverified_tip.number());
+
+        (start..=end).for_each(|unverified_block_number| {
             for unverified_block in self.load_full_unverified_blocks(unverified_block_number) {
                 self.consume_unverified_block(unverified_block);
             }
@@ -144,6 +143,9 @@ impl ConsumeUnverifiedBlockProcessor {
     }
 
     fn load_full_unverified_blocks(&self, block_number: BlockNumber) -> Vec<UnverifiedBlock> {
+        let _trace_timer = ckb_metrics::handle()
+            .map(|metrics| metrics.ckb_chain_load_full_unverified_block.start_timer());
+
         let number_and_hashes = {
             if let Some(number_and_hashes) =
                 self.unverified_info
@@ -248,6 +250,12 @@ impl ConsumeUnverifiedBlockProcessor {
     }
 
     pub(crate) fn consume_unverified_block(&mut self, unverified_block: UnverifiedBlock) {
+        let _trace_now = ckb_metrics::handle().map(|metrics| {
+            metrics
+                .ckb_chain_consume_unverified_block_duration
+                .start_timer()
+        });
+
         // process this unverified block
         let verify_result = self.verify_block(
             unverified_block.block(),
