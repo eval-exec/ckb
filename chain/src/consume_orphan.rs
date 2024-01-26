@@ -12,16 +12,19 @@ use ckb_shared::types::VerifyFailedBlockInfo;
 use ckb_shared::Shared;
 use ckb_store::ChainStore;
 use ckb_systemtime::unix_time_as_millis;
-use ckb_types::core::{BlockExt, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView};
+use ckb_types::core::{
+    BlockExt, BlockNumber, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView,
+};
 use ckb_types::packed::Byte32;
 use ckb_types::U256;
 use ckb_verification::InvalidParentError;
 use dashmap::DashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
-    pub unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
+    pub unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
     pub unverified_blocks_tx: Sender<UnverifiedBlock>,
 
     pub verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
@@ -103,14 +106,15 @@ impl ConsumeDescendantProcessor {
         let block_number = lonely_block.lonely_block.block.number();
         let block_hash = lonely_block.lonely_block.block.hash();
 
-        // self.unverified_info.insert(
-        //     block_hash.clone(),
-        //     UnverifiedInfo {
-        //         peer_id: lonely_block.lonely_block.peer_id,
-        //         switch: lonely_block.lonely_block.switch,
-        //         verify_callback: lonely_block.verify_callback,
-        //     },
-        // );
+        self.unverified_info
+            .entry(block_number)
+            .or_default()
+            .entry(block_hash.clone())
+            .or_insert(UnverifiedInfo {
+                peer_id: lonely_block.lonely_block.peer_id,
+                switch: lonely_block.lonely_block.switch,
+                verify_callback: lonely_block.verify_callback,
+            });
 
         if total_difficulty.gt(self.shared.get_unverified_tip().total_difficulty()) {
             self.shared.set_unverified_tip(ckb_shared::HeaderIndex::new(
@@ -191,7 +195,7 @@ impl ConsumeOrphan {
         unverified_blocks_tx: Sender<UnverifiedBlock>,
         lonely_blocks_rx: Receiver<LonelyBlockWithCallback>,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
-        unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
+        unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
         stop_rx: Receiver<()>,
     ) -> ConsumeOrphan {
         ConsumeOrphan {

@@ -32,11 +32,12 @@ use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
 use ckb_verification_traits::Switch;
 use dashmap::DashMap;
 use std::cmp;
-use std::collections::HashSet;
+use std::collections::hash_map::Keys;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub(crate) struct ConsumeUnverifiedBlockProcessor {
-    unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
+    unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
     pub(crate) shared: Shared,
     pub(crate) proposal_table: ProposalTable,
     pub(crate) verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
@@ -59,7 +60,7 @@ impl ConsumeUnverifiedBlocks {
         truncate_block_rx: Receiver<TruncateRequest>,
         proposal_table: ProposalTable,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
-        unverified_info: Arc<DashMap<Byte32, UnverifiedInfo>>,
+        unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
         stop_rx: Receiver<()>,
     ) -> Self {
         ConsumeUnverifiedBlocks {
@@ -143,16 +144,32 @@ impl ConsumeUnverifiedBlockProcessor {
     }
 
     fn load_full_unverified_blocks(&self, block_number: BlockNumber) -> Vec<UnverifiedBlock> {
-        let number_and_hashes: Vec<BlockNumberAndHash> =
-            self.load_unverified_block_hashes(block_number);
-        info!(
-            "load block_hash for {} got {:?}",
-            block_number,
-            number_and_hashes
-                .iter()
-                .map(|x| (x.number(), x.hash()))
-                .collect::<Vec<_>>()
-        );
+        let number_and_hashes = {
+            if let Some(number_and_hashes) =
+                self.unverified_info
+                    .get(&block_number)
+                    .map(|unverified_infos| {
+                        unverified_infos
+                            .value()
+                            .keys()
+                            .map(|hash| BlockNumberAndHash::new(block_number, hash.to_owned()))
+                            .collect::<Vec<_>>()
+                    })
+            {
+                number_and_hashes
+            } else {
+                let number_and_hashes = self.load_unverified_block_hashes(block_number);
+                info!(
+                    "load block_hash for {} got {:?}",
+                    block_number,
+                    number_and_hashes
+                        .iter()
+                        .map(|number_and_hash| (number_and_hash.number(), number_and_hash.hash()))
+                        .collect::<Vec<_>>()
+                );
+                number_and_hashes
+            }
+        };
         let unverified_blocks: Vec<UnverifiedBlock> = number_and_hashes
             .iter()
             .map(|number_and_hash| self.load_full_unverified_block(number_and_hash.clone()))
@@ -198,32 +215,35 @@ impl ConsumeUnverifiedBlockProcessor {
             .get_block_header(&block_view.data().header().raw().parent_hash())
             .expect("parent header stored");
 
-        if let Some((_block_hash, unverified_info)) =
-            self.unverified_info.remove(&number_and_hash.hash())
+        if let Some((_number, mut unverified_infos)) =
+            self.unverified_info.remove(&number_and_hash.number())
         {
-            UnverifiedBlock {
-                unverified_block: LonelyBlockWithCallback {
-                    lonely_block: LonelyBlock {
-                        block: Arc::new(block_view),
-                        peer_id: unverified_info.peer_id,
-                        switch: unverified_info.switch,
+            if let Some(unverified_info) = unverified_infos.remove(&number_and_hash.hash()) {
+                self.unverified_info
+                    .insert(number_and_hash.number(), unverified_infos);
+                return UnverifiedBlock {
+                    unverified_block: LonelyBlockWithCallback {
+                        lonely_block: LonelyBlock {
+                            block: Arc::new(block_view),
+                            peer_id: unverified_info.peer_id,
+                            switch: unverified_info.switch,
+                        },
+                        verify_callback: unverified_info.verify_callback,
                     },
-                    verify_callback: unverified_info.verify_callback,
-                },
-                parent_header: parent_header_view,
+                    parent_header: parent_header_view,
+                };
             }
-        } else {
-            return UnverifiedBlock {
-                unverified_block: LonelyBlockWithCallback {
-                    lonely_block: LonelyBlock {
-                        block: Arc::new(block_view),
-                        peer_id: None,
-                        switch: None,
-                    },
-                    verify_callback: None,
+        }
+        UnverifiedBlock {
+            unverified_block: LonelyBlockWithCallback {
+                lonely_block: LonelyBlock {
+                    block: Arc::new(block_view),
+                    peer_id: None,
+                    switch: None,
                 },
-                parent_header: parent_header_view,
-            };
+                verify_callback: None,
+            },
+            parent_header: parent_header_view,
         }
     }
 
