@@ -81,7 +81,7 @@ impl ConsumeUnverifiedBlocks {
         loop {
             let _trace_begin_loop = minstant::Instant::now();
             let check_unverified_ticker =
-                crossbeam::channel::tick(std::time::Duration::from_millis(10));
+                crossbeam::channel::tick(std::time::Duration::from_millis(5));
             select! {
                 recv(check_unverified_ticker) -> _msg => {
                     self.processor.find_and_consume_unverified_block();
@@ -133,7 +133,7 @@ impl ConsumeUnverifiedBlockProcessor {
         }
 
         let start = tip + 1;
-        let end = cmp::min(start + 9, unverified_tip.number());
+        let end = cmp::min(start + 49, unverified_tip.number());
 
         (start..=end).for_each(|unverified_block_number| {
             for unverified_block in self.load_full_unverified_blocks(unverified_block_number) {
