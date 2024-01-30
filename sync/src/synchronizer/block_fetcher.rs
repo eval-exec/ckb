@@ -91,11 +91,11 @@ impl BlockFetcher {
     }
 
     pub fn fetch(self) -> Option<Vec<Vec<packed::Byte32>>> {
-        if self.active_chain.unverified_tip_number() - self.active_chain.tip_number()
-            > BLOCK_DOWNLOAD_WINDOW * 3
-        {
-            return None;
-        }
+        // if self.active_chain.unverified_tip_number() - self.active_chain.tip_number()
+        //     > BLOCK_DOWNLOAD_WINDOW * 3
+        // {
+        //     return None;
+        // }
         let _trace_timecost: Option<HistogramTimer> = {
             ckb_metrics::handle().map(|handle| handle.ckb_sync_block_fetch_duration.start_timer())
         };
