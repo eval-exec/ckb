@@ -264,18 +264,8 @@ impl ConsumeUnverifiedBlockProcessor {
         );
         match &verify_result {
             Ok(_) => {
-                let log_now = std::time::Instant::now();
                 self.shared
                     .remove_block_status(&unverified_block.block().hash());
-                let log_elapsed_remove_block_status = log_now.elapsed();
-                self.shared
-                    .remove_header_view(&unverified_block.block().hash());
-                debug!(
-                    "block {} remove_block_status cost: {:?}, and header_view cost: {:?}",
-                    unverified_block.block().hash(),
-                    log_elapsed_remove_block_status,
-                    log_now.elapsed()
-                );
             }
             Err(err) => {
                 error!(

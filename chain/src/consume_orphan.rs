@@ -145,10 +145,13 @@ impl ConsumeDescendantProcessor {
     pub(crate) fn process_descendant(&self, lonely_block: LonelyBlockWithCallback) {
         match store_unverified_block(&self.shared, lonely_block.block().to_owned()) {
             Ok((_parent_header, total_difficulty)) => {
+                let block_hash = lonely_block.block().hash();
                 self.shared
-                    .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
+                    .insert_block_status(block_hash.clone(), BlockStatus::BLOCK_STORED);
 
-                self.send_unverified_block(lonely_block, total_difficulty)
+                self.send_unverified_block(lonely_block, total_difficulty);
+                // TODO: @eval-exec , re-think this
+                self.shared.remove_header_view(&block_hash);
             }
 
             Err(err) => {
