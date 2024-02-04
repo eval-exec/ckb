@@ -221,8 +221,10 @@ impl ConsumeUnverifiedBlockProcessor {
             self.unverified_info.remove(&number_and_hash.number())
         {
             if let Some(unverified_info) = unverified_infos.remove(&number_and_hash.hash()) {
-                self.unverified_info
-                    .insert(number_and_hash.number(), unverified_infos);
+                if !unverified_infos.is_empty() {
+                    self.unverified_info
+                        .insert(number_and_hash.number(), unverified_infos);
+                }
                 return UnverifiedBlock {
                     unverified_block: LonelyBlockWithCallback {
                         lonely_block: LonelyBlock {
