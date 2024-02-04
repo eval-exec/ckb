@@ -678,6 +678,10 @@ impl InflightBlocks {
                     "prune: remove InflightState: remove {}-{} from {}",
                     key.number, key.hash, value.peer
                 );
+
+                ckb_metrics::handle().map(|metrics| {
+                    metrics.ckb_inflight_timeout_count.inc();
+                });
             }
         }
 
