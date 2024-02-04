@@ -5,7 +5,7 @@ use crate::consume_unverified::ConsumeUnverifiedBlocks;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
 use crate::{
     tell_synchronizer_to_punish_the_bad_peer, ChainController, LonelyBlockWithCallback,
-    ProcessBlockRequest, UnverifiedBlock,
+    ProcessBlockRequest,
 };
 use ckb_channel::{self as channel, select, Receiver, SendError, Sender};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
@@ -32,8 +32,6 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
     let (truncate_block_tx, truncate_block_rx) = channel::bounded(1);
 
     let (unverified_queue_stop_tx, unverified_queue_stop_rx) = ckb_channel::bounded::<()>(1);
-    let (unverified_tx, unverified_rx) =
-        channel::bounded::<UnverifiedBlock>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
 
     let unverified_info = Arc::new(DashMap::new());
 
@@ -46,7 +44,6 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
             move || {
                 let consume_unverified = ConsumeUnverifiedBlocks::new(
                     shared,
-                    unverified_rx,
                     truncate_block_rx,
                     builder.proposal_table,
                     verify_failed_blocks_tx,
@@ -75,7 +72,6 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
                 let consume_orphan = ConsumeOrphan::new(
                     shared,
                     orphan_blocks_broker,
-                    unverified_tx,
                     lonely_block_rx,
                     verify_failed_block_tx,
                     unverified_info,

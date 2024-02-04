@@ -32,7 +32,6 @@ use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
 use ckb_verification_traits::Switch;
 use dashmap::DashMap;
 use std::cmp;
-use std::collections::hash_map::Keys;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -46,7 +45,6 @@ pub(crate) struct ConsumeUnverifiedBlockProcessor {
 pub(crate) struct ConsumeUnverifiedBlocks {
     tx_pool_controller: TxPoolController,
 
-    unverified_block_rx: Receiver<UnverifiedBlock>,
     truncate_block_rx: Receiver<TruncateRequest>,
 
     stop_rx: Receiver<()>,
@@ -56,7 +54,6 @@ pub(crate) struct ConsumeUnverifiedBlocks {
 impl ConsumeUnverifiedBlocks {
     pub(crate) fn new(
         shared: Shared,
-        unverified_blocks_rx: Receiver<UnverifiedBlock>,
         truncate_block_rx: Receiver<TruncateRequest>,
         proposal_table: ProposalTable,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
@@ -65,7 +62,6 @@ impl ConsumeUnverifiedBlocks {
     ) -> Self {
         ConsumeUnverifiedBlocks {
             tx_pool_controller: shared.tx_pool_controller().to_owned(),
-            unverified_block_rx: unverified_blocks_rx,
             truncate_block_rx,
             stop_rx,
             processor: ConsumeUnverifiedBlockProcessor {
@@ -85,23 +81,6 @@ impl ConsumeUnverifiedBlocks {
             select! {
                 recv(check_unverified_ticker) -> _msg => {
                     self.processor.find_and_consume_unverified_block();
-                },
-                recv(self.unverified_block_rx) -> msg => match msg {
-                    Ok(unverified_task) => {
-                        // process this unverified block
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_waiting_block_duration.observe(_trace_begin_loop.elapsed().as_secs_f64())
-                        }
-                        let _ = self.tx_pool_controller.suspend_chunk_process();
-
-                        self.processor.consume_unverified_block(unverified_task);
-
-                        let _ = self.tx_pool_controller.continue_chunk_process();
-                    },
-                    Err(err) => {
-                        error!("unverified_block_rx err: {}", err);
-                        return;
-                    },
                 },
                 recv(self.truncate_block_rx) -> msg => match msg {
                     Ok(Request { responder, arguments: target_tip_hash }) => {

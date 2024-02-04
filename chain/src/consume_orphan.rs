@@ -1,9 +1,6 @@
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{
-    tell_synchronizer_to_punish_the_bad_peer, LonelyBlockWithCallback, UnverifiedBlock,
-    UnverifiedInfo,
-};
-use ckb_channel::{select, Receiver, Sender};
+use crate::{tell_synchronizer_to_punish_the_bad_peer, LonelyBlockWithCallback, UnverifiedInfo};
+use ckb_channel::{select, Receiver};
 use ckb_error::Error;
 use ckb_logger::internal::trace;
 use ckb_logger::{debug, error, info};
@@ -25,7 +22,6 @@ use std::sync::Arc;
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
     pub unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
-    pub unverified_blocks_tx: Sender<UnverifiedBlock>,
 
     pub verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
 }
@@ -195,7 +191,6 @@ impl ConsumeOrphan {
     pub(crate) fn new(
         shared: Shared,
         orphan_block_pool: Arc<OrphanBlockPool>,
-        unverified_blocks_tx: Sender<UnverifiedBlock>,
         lonely_blocks_rx: Receiver<LonelyBlockWithCallback>,
         verify_failed_blocks_tx: tokio::sync::mpsc::UnboundedSender<VerifyFailedBlockInfo>,
         unverified_info: Arc<DashMap<BlockNumber, HashMap<Byte32, UnverifiedInfo>>>,
@@ -205,7 +200,6 @@ impl ConsumeOrphan {
             shared: shared.clone(),
             descendant_processor: ConsumeDescendantProcessor {
                 shared,
-                unverified_blocks_tx,
                 verify_failed_blocks_tx,
                 unverified_info,
             },
