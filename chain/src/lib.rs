@@ -71,14 +71,6 @@ pub struct LonelyBlockHash {
     pub verify_callback: Option<VerifyCallback>,
 }
 
-impl LonelyBlockHash {
-    pub(crate) fn execute_callback(self, verify_result: VerifyResult) {
-        if let Some(verify_callback) = self.verify_callback {
-            verify_callback(verify_result);
-        }
-    }
-}
-
 impl From<LonelyBlock> for LonelyBlockHash {
     fn from(val: LonelyBlock) -> Self {
         LonelyBlockHash {
@@ -91,7 +83,6 @@ impl From<LonelyBlock> for LonelyBlockHash {
         }
     }
 }
-
 impl LonelyBlock {
     pub(crate) fn block(&self) -> &Arc<BlockView> {
         &self.block
@@ -125,6 +116,11 @@ impl UnverifiedBlock {
     pub fn execute_callback(self, verify_result: VerifyResult) {
         self.lonely_block.execute_callback(verify_result)
     }
+}
+
+pub(crate) struct UnverifiedInfo {
+    switch: Option<Switch>,
+    verify_callback: Option<VerifyCallback>,
 }
 
 pub(crate) struct GlobalIndex {
