@@ -1,6 +1,5 @@
 use crate::{Status, StatusCode, FAST_INDEX, LOW_INDEX, NORMAL_INDEX, TIME_TRACE_SIZE};
 use ckb_app_config::SyncConfig;
-use ckb_chain::VerifyCallback;
 #[cfg(test)]
 use ckb_chain::VerifyResult;
 use ckb_chain::{ChainController, RemoteBlock};
@@ -1072,12 +1071,7 @@ impl SyncShared {
         chain.blocking_process_block(block)
     }
 
-    pub(crate) fn accept_remote_block(
-        &self,
-        chain: &ChainController,
-        remote_block: RemoteBlock,
-        verify_callback: Option<VerifyCallback>,
-    ) {
+    pub(crate) fn accept_remote_block(&self, chain: &ChainController, remote_block: RemoteBlock) {
         {
             let entry = self
                 .shared()
@@ -1088,7 +1082,7 @@ impl SyncShared {
             }
         }
 
-        chain.asynchronous_process_remote_block(remote_block, verify_callback)
+        chain.asynchronous_process_remote_block(remote_block)
     }
 
     /// Sync a new valid header, try insert to sync state
@@ -1992,5 +1986,24 @@ impl From<IBDState> for bool {
             IBDState::In => true,
             IBDState::Out => false,
         }
+    }
+}
+
+pub(crate) fn post_sync_process(
+    nc: &dyn CKBProtocolContext,
+    peer: PeerIndex,
+    item_name: &str,
+    status: Status,
+) {
+    if let Some(ban_time) = status.should_ban() {
+        error!(
+            "Receive {} from {}. Ban {:?} for {}",
+            item_name, peer, ban_time, status
+        );
+        nc.ban_peer(peer, ban_time, status.to_string());
+    } else if status.should_warn() {
+        warn!("Receive {} from {}, {}", item_name, peer, status);
+    } else if !status.is_ok() {
+        debug!("Receive {} from {}, {}", item_name, peer, status);
     }
 }
