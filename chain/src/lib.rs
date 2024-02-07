@@ -13,6 +13,7 @@ use ckb_types::packed::Byte32;
 use ckb_verification_traits::Switch;
 use std::sync::Arc;
 
+mod bootstrap;
 mod chain_controller;
 mod chain_service;
 mod consume_orphan;
@@ -21,8 +22,8 @@ mod consume_unverified;
 mod tests;
 mod utils;
 
+pub use bootstrap::start_chain_services;
 pub use chain_controller::ChainController;
-pub use chain_service::start_chain_services;
 pub use consume_orphan::store_unverified_block;
 
 type ProcessBlockRequest = Request<LonelyBlock, ()>;

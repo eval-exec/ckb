@@ -49,7 +49,7 @@ impl ChainController {
         self.asynchronous_process_lonely_block(lonely_block);
     }
 
-    fn asynchronous_process_lonely_block(&self, lonely_block: LonelyBlock) {
+    pub fn asynchronous_process_lonely_block(&self, lonely_block: LonelyBlock) {
         if Request::call(&self.process_block_sender, lonely_block).is_none() {
             error!("Chain service has gone")
         }
