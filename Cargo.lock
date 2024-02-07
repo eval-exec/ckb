@@ -589,7 +589,6 @@ version = "0.116.0-pre"
 dependencies = [
   "ckb-build-info",
   "ckb-chain-spec",
-  "ckb-constant",
   "ckb-jsonrpc-types",
   "ckb-logger",
   "ckb-logger-config",
@@ -691,6 +690,7 @@ dependencies = [
   "serde_json",
   "serde_plain",
   "tempfile",
+  "tokio",
   "toml",
 ]
 
@@ -718,8 +718,9 @@ dependencies = [
   "ckb-chain-spec",
   "ckb-channel",
   "ckb-constant",
-  "ckb-dao",
   "ckb-dao-utils",
+  "ckb-db",
+  "ckb-db-schema",
   "ckb-error",
   "ckb-jsonrpc-types",
   "ckb-logger",
@@ -743,6 +744,7 @@ dependencies = [
   "faux",
   "is_sorted",
   "lazy_static",
+  "minstant",
   "tempfile",
 ]
 
@@ -1012,7 +1014,6 @@ dependencies = [
   "ckb-logger",
   "ckb-network",
   "ckb-network-alert",
-  "ckb-proposal-table",
   "ckb-resource",
   "ckb-rpc",
   "ckb-shared",
@@ -1414,7 +1415,6 @@ dependencies = [
   "ckb-async-runtime",
   "ckb-chain",
   "ckb-chain-spec",
-  "ckb-channel",
   "ckb-constant",
   "ckb-dao",
   "ckb-dao-utils",
@@ -1511,6 +1511,7 @@ dependencies = [
   "ckb-db-schema",
   "ckb-error",
   "ckb-logger",
+  "ckb-metrics",
   "ckb-migrate",
   "ckb-notify",
   "ckb-proposal-table",
@@ -1588,7 +1589,6 @@ name = "ckb-sync"
 version = "0.116.0-pre"
 dependencies = [
   "ckb-app-config",
-  "ckb-async-runtime",
   "ckb-chain",
   "ckb-chain-spec",
   "ckb-channel",
@@ -1597,6 +1597,7 @@ dependencies = [
   "ckb-dao-utils",
   "ckb-error",
   "ckb-logger",
+  "ckb-logger-service",
   "ckb-metrics",
   "ckb-network",
   "ckb-proposal-table",
@@ -2042,7 +2043,7 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2801af0d36612ae591caa9568261fddce32ce6e08a7275ea334a06a4ad021a2c"
 dependencies = [
-  "cfg-if 1.0.0",
+  "cfg-if",
   "crossbeam-channel",
   "crossbeam-deque",
   "crossbeam-epoch",
