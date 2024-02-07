@@ -192,7 +192,6 @@ impl ConsumeOrphan {
                 block_hash.clone(),
                 total_difficulty,
             ));
-            self.shared.remove_header_view(&block_hash);
 
             if let Some(handle) = ckb_metrics::handle() {
                 handle.ckb_chain_unverified_tip.set(block_number as i64);
@@ -219,6 +218,7 @@ impl ConsumeOrphan {
             Ok((_parent_header, total_difficulty)) => {
                 self.shared
                     .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
+                self.shared.remove_header_view(&lonely_block.block().hash());
 
                 let lonely_block_hash: LonelyBlockHash = lonely_block.into();
 

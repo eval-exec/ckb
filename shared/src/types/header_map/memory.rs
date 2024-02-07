@@ -75,13 +75,20 @@ impl default::Default for MemoryMap {
 }
 
 impl MemoryMap {
-    #[cfg(feature = "stats")]
     pub(crate) fn len(&self) -> usize {
         self.0.read().len()
     }
 
     pub(crate) fn contains_key(&self, key: &Byte32) -> bool {
         self.0.read().contains_key(key)
+    }
+
+    pub(crate) fn get(&self, key: &Byte32) -> Option<HeaderIndexView> {
+        let guard = self.0.read();
+        guard
+            .get(key)
+            .cloned()
+            .map(|inner| (key.clone(), inner).into())
     }
 
     pub(crate) fn get_refresh(&self, key: &Byte32) -> Option<HeaderIndexView> {
