@@ -29,6 +29,8 @@ ckb-chain-spec = {path = "../spec", version = "= 0.114.0-pre"}
 ckb-miner = { path = "../miner", version = "= 0.114.0-pre" }
 ckb-network = { path = "../network", version = "= 0.114.0-pre"}
 ckb-resource = { path = "../resource", version = "= 0.114.0-pre"}
+ckb-db= { path = "../db", version = "= 0.114.0-pre"}
+ckb-db-schema= { path = "../db-schema", version = "= 0.114.0-pre"}
 ctrlc = { version = "3.1", features = ["termination"] }
 ckb-instrument = { path = "../util/instrument", version = "= 0.114.0-pre", features = ["progress_bar"] }
 ckb-build-info = { path = "../util/build-info", version = "= 0.114.0-pre" }

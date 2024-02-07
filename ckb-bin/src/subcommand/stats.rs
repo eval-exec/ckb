@@ -1,9 +1,13 @@
 use ckb_app_config::{ExitCode, StatsArgs};
 use ckb_async_runtime::Handle;
+use ckb_db::{Direction, IteratorMode};
+use ckb_db_schema::COLUMN_NUMBER_HASH;
 use ckb_shared::{Shared, SharedBuilder};
 use ckb_store::ChainStore;
+use ckb_types::packed::NumberHash;
 use ckb_types::{
     core::{BlockNumber, ScriptHashType},
+    packed,
     packed::CellbaseWitness,
     prelude::*,
 };
@@ -13,8 +17,7 @@ use std::convert::TryFrom;
 
 pub fn stats(args: StatsArgs, async_handle: Handle) -> Result<(), ExitCode> {
     let stats = Statics::build(args, async_handle)?;
-    stats.print_uncle_rate()?;
-    stats.print_miner_statics()?;
+    let _ = stats.print_unverified_blcoks();
     Ok(())
 }
 
@@ -46,6 +49,47 @@ impl Statics {
         }
 
         Ok(Statics { shared, from, to })
+    }
+
+    pub fn print_unverified_blcoks(&self) -> Result<(), ExitCode> {
+        let store = self.shared.store();
+        let tip = store.get_tip_header().expect("must have tip");
+        let tip_number = tip.number();
+        println!("current tip: {}-{}", tip_number, tip.hash());
+        let mut check_unverified_number = tip_number + 1;
+
+        loop {
+            let prefix_number_hash = packed::NumberHash::new_builder()
+                .number(check_unverified_number.pack())
+                .build();
+            let prefix = prefix_number_hash.as_slice();
+            let db_iter = store.get_iter(
+                COLUMN_NUMBER_HASH,
+                IteratorMode::From(prefix, Direction::Forward),
+            );
+
+            let number_hashes = db_iter
+                .take_while(|(key, _)| key.starts_with(prefix))
+                .map(|(k, _v)| {
+                    let number_hash =
+                        packed::NumberHashReader::from_slice_should_be_ok(k.as_ref()).to_entity();
+                    number_hash
+                })
+                .collect::<Vec<NumberHash>>();
+            if number_hashes.is_empty() {
+                break;
+            }
+            for number_hash in number_hashes {
+                println!(
+                    "unverified block found: number: {}, hash: {}",
+                    number_hash.number(),
+                    number_hash.block_hash()
+                );
+            }
+
+            check_unverified_number += 1;
+        }
+        Ok(())
     }
 
     // exclusively below and above inclusively (from..to]
