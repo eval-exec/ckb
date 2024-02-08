@@ -1211,13 +1211,20 @@ impl SyncShared {
             return false;
         }
 
-        if let dashmap::mapref::entry::Entry::Vacant(status) =
-            self.shared().block_status_map().entry(block.hash())
-        {
-            status.insert(BlockStatus::BLOCK_RECEIVED);
-            return true;
-        }
-        false
+        return match self.shared().block_status_map().entry(block.hash()) {
+            dashmap::mapref::entry::Entry::Vacant(status) => {
+                status.insert(BlockStatus::BLOCK_RECEIVED);
+                true
+            }
+            dashmap::mapref::entry::Entry::Occupied(status) => {
+                if status.get().contains(BlockStatus::BLOCK_RECEIVED) {
+                    false
+                } else {
+                    status.replace_entry(BlockStatus::BLOCK_RECEIVED);
+                    true
+                }
+            }
+        };
     }
 }
 
