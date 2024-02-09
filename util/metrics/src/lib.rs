@@ -89,6 +89,7 @@ pub struct Metrics {
     pub ckb_chain_unverified_block_ch_len: IntGauge,
     pub ckb_chain_fill_unverified_block_ch_len: IntGauge,
     pub ckb_chain_load_full_unverified_block: Histogram,
+    pub ckb_chain_load_full_unverified_block_header: Histogram,
     /// ckb_sync_msg_process duration (seconds)
     pub ckb_sync_msg_process_duration: HistogramVec,
     /// ckb_sync_block_fetch duraiton (seconds)
@@ -184,6 +185,10 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
         ckb_chain_load_full_unverified_block: register_histogram!(
             "ckb_chain_load_full_unverified_block",
             "The CKB chain load_full_unverified_block duration (seconds)"
+        ).unwrap(),
+        ckb_chain_load_full_unverified_block_header: register_histogram!(
+            "ckb_chain_load_full_unverified_block_header",
+            "The CKB chain load_full_unverified_block_header duration (seconds)"
         ).unwrap(),
         ckb_sync_msg_process_duration: register_histogram_vec!(
             "ckb_sync_msg_process_duration",

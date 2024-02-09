@@ -85,11 +85,18 @@ impl FillUnverifiedBlocksChannel {
             .get_block(&block_number_and_hash.hash())
             .expect("block stored");
         let block = Arc::new(block_view);
-        let parent_header = self
-            .shared
-            .store()
-            .get_block_header(&block.data().header().raw().parent_hash())
-            .expect("parent header stored");
+        let parent_header = {
+            let _trace_timecost = ckb_metrics::handle().map(|metrics| {
+                metrics
+                    .ckb_chain_load_full_unverified_block_header
+                    .start_timer()
+            });
+
+            self.shared
+                .store()
+                .get_block_header(&block.data().header().raw().parent_hash())
+                .expect("parent header stored")
+        };
 
         UnverifiedBlock {
             block,
