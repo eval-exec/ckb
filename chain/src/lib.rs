@@ -10,7 +10,7 @@
 use ckb_error::Error;
 use ckb_shared::types::BlockNumberAndHash;
 use ckb_types::core::service::Request;
-use ckb_types::core::{BlockNumber, BlockView};
+use ckb_types::core::{BlockNumber, BlockView, HeaderView};
 use ckb_types::packed::Byte32;
 use ckb_verification_traits::Switch;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ mod chain_controller;
 mod chain_service;
 mod consume_orphan;
 mod consume_unverified;
+mod fill_unverified_blocks_channel;
 mod init;
 mod init_load_unverified;
 #[cfg(test)]
@@ -26,7 +27,6 @@ mod tests;
 mod utils;
 
 pub use chain_controller::ChainController;
-pub use consume_orphan::store_unverified_block;
 pub use init::start_chain_services;
 
 type ProcessBlockRequest = Request<LonelyBlock, ()>;
@@ -86,6 +86,18 @@ impl From<LonelyBlock> for LonelyBlockHash {
             verify_callback: val.verify_callback,
         }
     }
+}
+
+/// UnverifiedBlock will be consumed by ConsumeUnverified thread
+struct UnverifiedBlock {
+    // block
+    block: Arc<BlockView>,
+    // the switch to control the verification process
+    switch: Option<Switch>,
+    // verify callback
+    verify_callback: Option<VerifyCallback>,
+    // parent header
+    parent_header: HeaderView,
 }
 
 impl LonelyBlock {

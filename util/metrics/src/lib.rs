@@ -55,6 +55,18 @@ make_static_metric! {
             miss,
         },
     }
+
+    struct CkbGetBlockStatus: IntCounter {
+        "type" => {
+            from_snap,
+            from_chaindb,
+        },
+        "access_from" => {
+            from_block_status_map,
+            from_header_map,
+            from_rocksdb,
+        }
+    }
 }
 
 pub struct Metrics {
@@ -74,8 +86,10 @@ pub struct Metrics {
     pub ckb_chain_execute_callback_duration: Histogram,
     /// ckb_chain orphan blocks count
     pub ckb_chain_orphan_count: IntGauge,
-    pub ckb_chain_lonely_block_ch_len: IntGauge,
     pub ckb_chain_unverified_block_ch_len: IntGauge,
+    pub ckb_chain_fill_unverified_block_ch_len: IntGauge,
+    pub ckb_chain_load_full_unverified_block: Histogram,
+    pub ckb_chain_load_full_unverified_block_header: Histogram,
     /// ckb_sync_msg_process duration (seconds)
     pub ckb_sync_msg_process_duration: HistogramVec,
     /// ckb_sync_block_fetch duraiton (seconds)
@@ -88,6 +102,7 @@ pub struct Metrics {
     pub ckb_header_map_memory_count: IntGauge,
     // how many times the HeaderMap's memory map is hit?
     pub ckb_header_map_memory_hit_miss_count: CkbHeaderMapMemoryHitMissStatistics,
+    pub ckb_get_block_status: CkbGetBlockStatus,
     /// Gauge for tracking the size of all frozen data
     pub ckb_freezer_size: IntGauge,
     /// Counter for measuring the effective amount of data read
@@ -159,13 +174,21 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
             "ckb_chain_orphan_count",
             "The CKB chain orphan blocks count",
         ).unwrap(),
-        ckb_chain_lonely_block_ch_len: register_int_gauge!(
-            "ckb_chain_lonely_block_ch_len",
-            "The CKB chain lonely block channel length",
-        ).unwrap(),
         ckb_chain_unverified_block_ch_len: register_int_gauge!(
             "ckb_chain_unverified_block_ch_len",
             "The CKB chain unverified block channel length",
+        ).unwrap(),
+        ckb_chain_fill_unverified_block_ch_len: register_int_gauge!(
+            "ckb_chain_fill_unverified_block_ch_len",
+            "The CKB chain fill unverified block channel length",
+        ).unwrap(),
+        ckb_chain_load_full_unverified_block: register_histogram!(
+            "ckb_chain_load_full_unverified_block",
+            "The CKB chain load_full_unverified_block duration (seconds)"
+        ).unwrap(),
+        ckb_chain_load_full_unverified_block_header: register_histogram!(
+            "ckb_chain_load_full_unverified_block_header",
+            "The CKB chain load_full_unverified_block_header duration (seconds)"
         ).unwrap(),
         ckb_sync_msg_process_duration: register_histogram_vec!(
             "ckb_sync_msg_process_duration",
@@ -193,10 +216,12 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
             &register_int_counter_vec!(
             "ckb_header_map_memory_hit_miss_count",
             "The CKB HeaderMap memory hit count",
-            &["type"]
-        )
-                .unwrap()
-        ),
+                &["type"]).unwrap()),
+        ckb_get_block_status: CkbGetBlockStatus::from(
+            &register_int_counter_vec!(
+            "ckb_get_block_status",
+            "The CKB get block status",
+                &["type", "access_from"]).unwrap()),
         ckb_freezer_size: register_int_gauge!("ckb_freezer_size", "The CKB freezer size").unwrap(),
         ckb_freezer_read: register_int_counter!("ckb_freezer_read", "The CKB freezer read").unwrap(),
         ckb_relay_transaction_short_id_collide: register_int_counter!(

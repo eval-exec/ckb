@@ -1111,16 +1111,24 @@ impl SyncShared {
             parent_header_index.total_difficulty() + header.difficulty(),
         );
 
-        let snapshot = Arc::clone(&self.shared.snapshot());
+        // let snapshot = Arc::clone(&self.shared.snapshot());
+        let shared = self.shared().clone();
+
+        // self.store().get_block_epoch_index(hash).is_some()
         header_view.build_skip(
             tip_number,
             |hash, store_first| self.get_header_index_view(hash, store_first),
             |number, current| {
                 // shortcut to return an ancestor block
-                if current.number <= snapshot.tip_number() && snapshot.is_main_chain(&current.hash)
+                if current.number <= shared.get_unverified_tip().number()
+                    && shared
+                        .store()
+                        .get_block_epoch_index(&current.hash)
+                        .is_some()
                 {
-                    snapshot
-                        .get_block_hash(number)
+                    shared
+                        .get_unverified_index()
+                        .get(&number)
                         .and_then(|hash| self.get_header_index_view(&hash, true))
                 } else {
                     None
@@ -1211,13 +1219,20 @@ impl SyncShared {
             return false;
         }
 
-        if let dashmap::mapref::entry::Entry::Vacant(status) =
-            self.shared().block_status_map().entry(block.hash())
-        {
-            status.insert(BlockStatus::BLOCK_RECEIVED);
-            return true;
-        }
-        false
+        return match self.shared().block_status_map().entry(block.hash()) {
+            dashmap::mapref::entry::Entry::Vacant(status) => {
+                status.insert(BlockStatus::BLOCK_RECEIVED);
+                true
+            }
+            dashmap::mapref::entry::Entry::Occupied(status) => {
+                if status.get().contains(BlockStatus::BLOCK_RECEIVED) {
+                    false
+                } else {
+                    status.replace_entry(BlockStatus::BLOCK_RECEIVED);
+                    true
+                }
+            }
+        };
     }
 }
 

@@ -1,5 +1,6 @@
 //! Provide Shared
 #![allow(missing_docs)]
+
 use crate::block_status::BlockStatus;
 use crate::{HeaderMap, Snapshot, SnapshotMgr};
 use arc_swap::{ArcSwap, Guard};
@@ -11,6 +12,7 @@ use ckb_db::{Direction, IteratorMode};
 use ckb_db_schema::{COLUMN_BLOCK_BODY, COLUMN_NUMBER_HASH};
 use ckb_error::{AnyError, Error};
 use ckb_logger::debug;
+use ckb_metrics::Metrics;
 use ckb_notify::NotifyController;
 use ckb_proposal_table::ProposalView;
 use ckb_stop_handler::{new_crossbeam_exit_rx, register_thread};
@@ -26,6 +28,7 @@ use ckb_types::{
 use ckb_util::{shrink_to_fit, Mutex, MutexGuard};
 use ckb_verification::cache::TxVerificationCache;
 use dashmap::DashMap;
+use std::any::Any;
 use std::cmp;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,6 +70,7 @@ pub struct Shared {
     pub header_map: Arc<HeaderMap>,
     pub(crate) block_status_map: Arc<DashMap<Byte32, BlockStatus>>,
     pub(crate) unverified_tip: Arc<ArcSwap<crate::HeaderIndex>>,
+    pub(crate) unverified_index: Arc<DashMap<BlockNumber, Byte32>>,
 }
 
 impl Shared {
@@ -95,6 +99,8 @@ impl Shared {
             header.difficulty(),
         ))));
 
+        let unverified_index = Arc::new(DashMap::new());
+
         Shared {
             store,
             tx_pool_controller,
@@ -108,6 +114,7 @@ impl Shared {
             header_map,
             block_status_map,
             unverified_tip,
+            unverified_index,
         }
     }
     /// Spawn freeze background thread that periodically checks and moves ancient data from the kv database into the freezer.
@@ -408,6 +415,10 @@ impl Shared {
         self.unverified_tip.load().as_ref().clone()
     }
 
+    pub fn get_unverified_index(&self) -> Arc<DashMap<BlockNumber, Byte32>> {
+        Arc::clone(&self.unverified_index)
+    }
+
     pub fn header_map(&self) -> &HeaderMap {
         &self.header_map
     }
@@ -419,13 +430,58 @@ impl Shared {
         &self.block_status_map
     }
 
-    pub fn get_block_status<T: ChainStore>(&self, store: &T, block_hash: &Byte32) -> BlockStatus {
+    pub fn get_block_status<T: ChainStore + 'static>(
+        &self,
+        store: &T,
+        block_hash: &Byte32,
+    ) -> BlockStatus {
+        let is_from_chaindb_fn =
+            |store: &T| -> bool { (store as &dyn Any).downcast_ref::<ChainDB>().is_some() };
+
         match self.block_status_map().get(block_hash) {
-            Some(status_ref) => *status_ref.value(),
+            Some(status_ref) => {
+                if let Some(metrics) = ckb_metrics::handle() {
+                    if is_from_chaindb_fn(store) {
+                        metrics
+                            .ckb_get_block_status
+                            .from_chaindb
+                            .from_block_status_map
+                            .inc();
+                    } else {
+                        metrics
+                            .ckb_get_block_status
+                            .from_snap
+                            .from_block_status_map
+                            .inc();
+                    }
+                }
+
+                *status_ref.value()
+            }
             None => {
                 if self.header_map().contains_key(block_hash) {
+                    if let Some(metrics) = ckb_metrics::handle() {
+                        if is_from_chaindb_fn(store) {
+                            metrics
+                                .ckb_get_block_status
+                                .from_chaindb
+                                .from_header_map
+                                .inc();
+                        } else {
+                            metrics.ckb_get_block_status.from_snap.from_header_map.inc();
+                        }
+                    }
+
                     BlockStatus::HEADER_VALID
                 } else {
+                    if let Some(metrics) = ckb_metrics::handle() {
+                        if is_from_chaindb_fn(store) {
+                            metrics.ckb_get_block_status.from_chaindb.from_rocksdb.inc();
+                        } else {
+                            metrics.ckb_get_block_status.from_snap.from_rocksdb.inc();
+                        }
+                    }
+
                     let verified = store
                         .get_block_ext(block_hash)
                         .map(|block_ext| block_ext.verified);
@@ -440,7 +496,7 @@ impl Shared {
         }
     }
 
-    pub fn contains_block_status<T: ChainStore>(
+    pub fn contains_block_status<T: ChainStore + 'static>(
         &self,
         store: &T,
         block_hash: &Byte32,

@@ -111,7 +111,15 @@ where
         {
             self.stats().tick_primary_select();
         }
-        if let Some(view) = self.memory.get_refresh(hash) {
+        let value = {
+            if self.memory.len() < self.memory_limit {
+                self.memory.get_refresh(hash)
+            } else {
+                self.memory.get(hash)
+            }
+        };
+
+        if let Some(view) = value {
             if let Some(metrics) = ckb_metrics::handle() {
                 metrics.ckb_header_map_memory_hit_miss_count.hit.inc();
             }
