@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 
-const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW * 2) as usize;
+const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW * 200) as usize;
 
 pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
     let orphan_blocks_broker = Arc::new(OrphanBlockPool::with_capacity(ORPHAN_BLOCK_SIZE));

@@ -15,77 +15,6 @@ use ckb_types::U256;
 use ckb_verification::InvalidParentError;
 use std::sync::Arc;
 
-// Store the an unverified block to the database. We may usually do this
-// for an orphan block with unknown parent. But this function is also useful in testing.
-pub fn store_unverified_block(
-    shared: &Shared,
-    block: Arc<BlockView>,
-) -> Result<(HeaderView, U256), Error> {
-    let (block_number, block_hash) = (block.number(), block.hash());
-
-    let parent_header = shared
-        .store()
-        .get_block_header(&block.data().header().raw().parent_hash())
-        .expect("parent already store");
-
-    if let Some(ext) = shared.store().get_block_ext(&block.hash()) {
-        debug!("block {}-{} has stored BlockExt", block_number, block_hash);
-        return Ok((parent_header, ext.total_difficulty));
-    }
-
-    trace!("begin accept block: {}-{}", block.number(), block.hash());
-
-    let parent_ext = shared
-        .store()
-        .get_block_ext(&block.data().header().raw().parent_hash())
-        .expect("parent already store");
-
-    if parent_ext.verified == Some(false) {
-        return Err(InvalidParentError {
-            parent_hash: parent_header.hash(),
-        }
-        .into());
-    }
-
-    let cannon_total_difficulty =
-        parent_ext.total_difficulty.to_owned() + block.header().difficulty();
-
-    let db_txn = Arc::new(shared.store().begin_transaction());
-
-    db_txn.insert_block(block.as_ref())?;
-
-    let next_block_epoch = shared
-        .consensus()
-        .next_epoch_ext(&parent_header, &db_txn.borrow_as_data_loader())
-        .expect("epoch should be stored");
-    let new_epoch = next_block_epoch.is_head();
-    let epoch = next_block_epoch.epoch();
-
-    db_txn.insert_block_epoch_index(
-        &block.header().hash(),
-        &epoch.last_block_hash_in_previous_epoch(),
-    )?;
-    if new_epoch {
-        db_txn.insert_epoch_ext(&epoch.last_block_hash_in_previous_epoch(), &epoch)?;
-    }
-
-    let ext = BlockExt {
-        received_at: unix_time_as_millis(),
-        total_difficulty: cannon_total_difficulty.clone(),
-        total_uncles_count: parent_ext.total_uncles_count + block.data().uncles().len() as u64,
-        verified: None,
-        txs_fees: vec![],
-        cycles: None,
-        txs_sizes: None,
-    };
-
-    db_txn.insert_block_ext(&block.header().hash(), &ext)?;
-
-    db_txn.commit()?;
-
-    Ok((parent_header, cannon_total_difficulty))
-}
-
 pub(crate) struct ConsumeOrphan {
     shared: Shared,
 
@@ -117,7 +46,7 @@ impl ConsumeOrphan {
                 continue;
             }
 
-            let descendants: Vec<LonelyBlock> = self
+            let descendants: Vec<LonelyBlockHash> = self
                 .orphan_blocks_broker
                 .remove_blocks_by_parent(&leader_hash);
             if descendants.is_empty() {
@@ -131,7 +60,7 @@ impl ConsumeOrphan {
         }
     }
 
-    pub(crate) fn process_lonely_block(&self, lonely_block: LonelyBlock) {
+    pub(crate) fn process_lonely_block(&self, lonely_block: LonelyBlockHash) {
         let parent_hash = lonely_block.block().parent_hash();
         let parent_status = self
             .shared
@@ -164,7 +93,7 @@ impl ConsumeOrphan {
                 .set(self.orphan_blocks_broker.len() as i64)
         });
     }
-    fn send_unverified_block(&self, lonely_block: LonelyBlockHash, total_difficulty: U256) {
+    fn send_unverified_block(&self, lonely_block: LonelyBlockHash) {
         let block_number = lonely_block.block_number_and_hash.number();
         let block_hash = lonely_block.block_number_and_hash.hash();
         if let Some(metrics) = ckb_metrics::handle() {
@@ -185,12 +114,11 @@ impl ConsumeOrphan {
                 return;
             }
         };
-
-        if total_difficulty.gt(self.shared.get_unverified_tip().total_difficulty()) {
+        if lonely_block.block_number_and_hash.number() > self.shared.snapshot().tip_number() {
             self.shared.set_unverified_tip(ckb_shared::HeaderIndex::new(
                 block_number,
                 block_hash.clone(),
-                total_difficulty,
+                0.into(),
             ));
             self.shared
                 .get_unverified_index()
@@ -205,42 +133,18 @@ impl ConsumeOrphan {
                 block_hash.clone(),
                 block_number.saturating_sub(self.shared.snapshot().tip_number())
             )
-        } else {
-            debug!(
-                "received a block {}-{} with lower or equal difficulty than unverified_tip {}-{}",
-                block_number,
-                block_hash,
-                self.shared.get_unverified_tip().number(),
-                self.shared.get_unverified_tip().hash(),
-            );
         }
     }
 
-    pub(crate) fn process_descendant(&self, lonely_block: LonelyBlock) {
-        match store_unverified_block(&self.shared, lonely_block.block().to_owned()) {
-            Ok((_parent_header, total_difficulty)) => {
-                self.shared
-                    .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
-                self.shared.remove_header_view(&lonely_block.block().hash());
+    pub(crate) fn process_descendant(&self, lonely_block: LonelyBlockHash) {
+        self.shared
+            .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
+        self.shared.remove_header_view(&lonely_block.block().hash());
 
-                let lonely_block_hash: LonelyBlockHash = lonely_block.into();
-
-                self.send_unverified_block(lonely_block_hash, total_difficulty)
-            }
-
-            Err(err) => {
-                error!(
-                    "accept block {} failed: {}",
-                    lonely_block.block().hash(),
-                    err
-                );
-
-                lonely_block.execute_callback(Err(err));
-            }
-        }
+        self.send_unverified_block(lonely_block)
     }
 
-    fn accept_descendants(&self, descendants: Vec<LonelyBlock>) {
+    fn accept_descendants(&self, descendants: Vec<LonelyBlockHash>) {
         for descendant_block in descendants {
             self.process_descendant(descendant_block);
         }

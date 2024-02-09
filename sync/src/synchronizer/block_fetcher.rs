@@ -174,7 +174,8 @@ impl BlockFetcher {
                 IBDState::Out => last_common.number() + 1,
             }
         };
-        let mut end = min(best_known.number(), start + BLOCK_DOWNLOAD_WINDOW);
+        // let mut end = min(best_known.number(), start + BLOCK_DOWNLOAD_WINDOW);
+        let mut end = best_known.number();
         let n_fetch = min(
             end.saturating_sub(start) as usize + 1,
             state.read_inflight_blocks().peer_can_fetch_count(self.peer),
