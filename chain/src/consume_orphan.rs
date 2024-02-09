@@ -192,6 +192,9 @@ impl ConsumeOrphan {
                 block_hash.clone(),
                 total_difficulty,
             ));
+            self.shared
+                .get_unverified_index()
+                .insert(block_number, block_hash.clone());
 
             if let Some(handle) = ckb_metrics::handle() {
                 handle.ckb_chain_unverified_tip.set(block_number as i64);

@@ -70,6 +70,7 @@ pub struct Shared {
     pub header_map: Arc<HeaderMap>,
     pub(crate) block_status_map: Arc<DashMap<Byte32, BlockStatus>>,
     pub(crate) unverified_tip: Arc<ArcSwap<crate::HeaderIndex>>,
+    pub(crate) unverified_index: Arc<DashMap<BlockNumber, Byte32>>,
 }
 
 impl Shared {
@@ -98,6 +99,8 @@ impl Shared {
             header.difficulty(),
         ))));
 
+        let unverified_index = Arc::new(DashMap::new());
+
         Shared {
             store,
             tx_pool_controller,
@@ -111,6 +114,7 @@ impl Shared {
             header_map,
             block_status_map,
             unverified_tip,
+            unverified_index,
         }
     }
     /// Spawn freeze background thread that periodically checks and moves ancient data from the kv database into the freezer.
@@ -409,6 +413,10 @@ impl Shared {
     }
     pub fn get_unverified_tip(&self) -> crate::HeaderIndex {
         self.unverified_tip.load().as_ref().clone()
+    }
+
+    pub fn get_unverified_index(&self) -> Arc<DashMap<BlockNumber, Byte32>> {
+        Arc::clone(&self.unverified_index)
     }
 
     pub fn header_map(&self) -> &HeaderMap {
