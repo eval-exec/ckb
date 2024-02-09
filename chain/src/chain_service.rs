@@ -2,7 +2,7 @@
 #![allow(missing_docs)]
 
 use crate::consume_orphan::ConsumeOrphan;
-use crate::{LonelyBlock, ProcessBlockRequest};
+use crate::{LonelyBlock, LonelyBlockHash, ProcessBlockRequest};
 use ckb_channel::{select, Receiver};
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::{self, debug, error, info, warn};
@@ -126,7 +126,18 @@ impl ChainService {
                 return;
             }
         }
-        self.consume_orphan.process_lonely_block(lonely_block);
+        let db_txn = self.shared.store().begin_transaction();
+        if let Err(err) = db_txn.insert_block(&lonely_block.block()) {
+            error!("insert block failed: {:?}", err);
+            return;
+        }
+        if let Err(err) = db_txn.commit() {
+            error!("commit block failed: {:?}", err);
+            return;
+        }
+
+        let lonely_block_hash: LonelyBlockHash = lonely_block.into();
+        self.consume_orphan.process_lonely_block(lonely_block_hash);
 
         debug!(
             "processing block: {}-{}, (tip:unverified_tip):({}:{})",
