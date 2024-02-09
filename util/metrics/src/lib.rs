@@ -55,6 +55,18 @@ make_static_metric! {
             miss,
         },
     }
+
+    struct CkbGetBlockStatus: IntCounter {
+        "type" => {
+            from_snap,
+            from_chaindb,
+        },
+        "access_from" => {
+            from_block_status_map,
+            from_header_map,
+            from_rocksdb,
+        }
+    }
 }
 
 pub struct Metrics {
@@ -89,6 +101,7 @@ pub struct Metrics {
     pub ckb_header_map_memory_count: IntGauge,
     // how many times the HeaderMap's memory map is hit?
     pub ckb_header_map_memory_hit_miss_count: CkbHeaderMapMemoryHitMissStatistics,
+    pub ckb_get_block_status: CkbGetBlockStatus,
     /// Gauge for tracking the size of all frozen data
     pub ckb_freezer_size: IntGauge,
     /// Counter for measuring the effective amount of data read
@@ -198,10 +211,12 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
             &register_int_counter_vec!(
             "ckb_header_map_memory_hit_miss_count",
             "The CKB HeaderMap memory hit count",
-            &["type"]
-        )
-                .unwrap()
-        ),
+                &["type"]).unwrap()),
+        ckb_get_block_status: CkbGetBlockStatus::from(
+            &register_int_counter_vec!(
+            "ckb_get_block_status",
+            "The CKB get block status",
+                &["type", "access_from"]).unwrap()),
         ckb_freezer_size: register_int_gauge!("ckb_freezer_size", "The CKB freezer size").unwrap(),
         ckb_freezer_read: register_int_counter!("ckb_freezer_read", "The CKB freezer read").unwrap(),
         ckb_relay_transaction_short_id_collide: register_int_counter!(
