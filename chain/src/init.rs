@@ -5,12 +5,13 @@ use crate::chain_service::ChainService;
 use crate::consume_unverified::ConsumeUnverifiedBlocks;
 use crate::init_load_unverified::InitLoadUnverified;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{ChainController, LonelyBlock, LonelyBlockHash};
+use crate::{ChainController, LonelyBlock};
 use ckb_channel::{self as channel, SendError};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
 use ckb_logger::warn;
 use ckb_shared::ChainServicesBuilder;
 use ckb_stop_handler::{new_crossbeam_exit_rx, register_thread};
+use ckb_types::core::HeaderView;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
@@ -24,7 +25,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
 
     let (unverified_queue_stop_tx, unverified_queue_stop_rx) = ckb_channel::bounded::<()>(1);
     let (unverified_tx, unverified_rx) =
-        channel::bounded::<LonelyBlockHash>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
+        channel::bounded::<(LonelyBlock, HeaderView)>(BLOCK_DOWNLOAD_WINDOW as usize * 3);
 
     let consumer_unverified_thread = thread::Builder::new()
         .name("consume_unverified_blocks".into())

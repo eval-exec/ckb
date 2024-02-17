@@ -1,4 +1,4 @@
-use crate::LonelyBlockHash;
+use crate::LonelyBlock;
 use crate::{utils::forkchanges::ForkChanges, GlobalIndex, TruncateRequest, VerifyResult};
 use ckb_channel::{select, Receiver};
 use ckb_error::{Error, InternalErrorKind};
@@ -35,7 +35,7 @@ pub(crate) struct ConsumeUnverifiedBlockProcessor {
 pub(crate) struct ConsumeUnverifiedBlocks {
     tx_pool_controller: TxPoolController,
 
-    unverified_block_rx: Receiver<LonelyBlockHash>,
+    unverified_block_rx: Receiver<(LonelyBlock, HeaderView)>,
     truncate_block_rx: Receiver<TruncateRequest>,
 
     stop_rx: Receiver<()>,
@@ -45,7 +45,7 @@ pub(crate) struct ConsumeUnverifiedBlocks {
 impl ConsumeUnverifiedBlocks {
     pub(crate) fn new(
         shared: Shared,
-        unverified_blocks_rx: Receiver<LonelyBlockHash>,
+        unverified_blocks_rx: Receiver<(LonelyBlock, HeaderView)>,
         truncate_block_rx: Receiver<TruncateRequest>,
         proposal_table: ProposalTable,
         stop_rx: Receiver<()>,
@@ -109,52 +109,32 @@ impl ConsumeUnverifiedBlocks {
 }
 
 impl ConsumeUnverifiedBlockProcessor {
-    fn load_unverified_block_and_parent_header(
-        &self,
-        block_hash: &Byte32,
-    ) -> (BlockView, HeaderView) {
-        let block_view = self
-            .shared
-            .store()
-            .get_block(block_hash)
-            .expect("block stored");
-        let parent_header_view = self
-            .shared
-            .store()
-            .get_block_header(&block_view.data().header().raw().parent_hash())
-            .expect("parent header stored");
-
-        (block_view, parent_header_view)
-    }
-
-    pub(crate) fn consume_unverified_blocks(&mut self, lonely_block_hash: LonelyBlockHash) {
-        let LonelyBlockHash {
-            block_number_and_hash,
+    pub(crate) fn consume_unverified_blocks(&mut self, unverified_task: (LonelyBlock, HeaderView)) {
+        let LonelyBlock {
+            block,
             switch,
             verify_callback,
-        } = lonely_block_hash;
-        let (unverified_block, parent_header) =
-            self.load_unverified_block_and_parent_header(&block_number_and_hash.hash);
+        } = unverified_task.0;
+        let parent_header = unverified_task.1;
+        let block_hash = block.hash();
+
         // process this unverified block
-        let verify_result = self.verify_block(&unverified_block, &parent_header, switch);
+        let verify_result = self.verify_block(&block, &parent_header, switch);
         match &verify_result {
             Ok(_) => {
                 let log_now = std::time::Instant::now();
-                self.shared.remove_block_status(&block_number_and_hash.hash);
+                self.shared.remove_block_status(&block_hash);
                 let log_elapsed_remove_block_status = log_now.elapsed();
-                self.shared.remove_header_view(&block_number_and_hash.hash);
+                self.shared.remove_header_view(&block_hash);
                 debug!(
                     "block {} remove_block_status cost: {:?}, and header_view cost: {:?}",
-                    block_number_and_hash.hash,
+                    block_hash,
                     log_elapsed_remove_block_status,
                     log_now.elapsed()
                 );
             }
             Err(err) => {
-                error!(
-                    "verify block {} failed: {}",
-                    block_number_and_hash.hash, err
-                );
+                error!("verify block {} failed: {}", block_hash, err);
 
                 let tip = self
                     .shared
@@ -174,12 +154,12 @@ impl ConsumeUnverifiedBlockProcessor {
                 ));
 
                 self.shared
-                    .insert_block_status(block_number_and_hash.hash(), BlockStatus::BLOCK_INVALID);
+                    .insert_block_status(block_hash.clone(), BlockStatus::BLOCK_INVALID);
                 error!(
                     "set_unverified tip to {}-{}, because verify {} failed: {}",
                     tip.number(),
                     tip.hash(),
-                    block_number_and_hash.hash,
+                    block_hash,
                     err
                 );
             }
