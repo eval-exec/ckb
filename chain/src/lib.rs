@@ -8,7 +8,6 @@
 //! [`ChainService`]: chain/struct.ChainService.html
 //! [`ChainController`]: chain/struct.ChainController.html
 use ckb_error::Error;
-use ckb_shared::types::BlockNumberAndHash;
 use ckb_types::core::service::Request;
 use ckb_types::core::{BlockNumber, BlockView};
 use ckb_types::packed::Byte32;
@@ -61,31 +60,6 @@ pub struct LonelyBlock {
 
     /// The optional verify_callback
     pub verify_callback: Option<VerifyCallback>,
-}
-
-/// LonelyBlock is the block which we have not check weather its parent is stored yet
-pub struct LonelyBlockHash {
-    /// block
-    pub block_number_and_hash: BlockNumberAndHash,
-
-    /// The Switch to control the verification process
-    pub switch: Option<Switch>,
-
-    /// The optional verify_callback
-    pub verify_callback: Option<VerifyCallback>,
-}
-
-impl From<LonelyBlock> for LonelyBlockHash {
-    fn from(val: LonelyBlock) -> Self {
-        LonelyBlockHash {
-            block_number_and_hash: BlockNumberAndHash {
-                number: val.block.number(),
-                hash: val.block.hash(),
-            },
-            switch: val.switch,
-            verify_callback: val.verify_callback,
-        }
-    }
 }
 
 impl LonelyBlock {

@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{LonelyBlock, LonelyBlockHash};
+use crate::LonelyBlock;
 use ckb_channel::{select, Receiver, Sender};
 use ckb_error::Error;
 use ckb_logger::internal::trace;
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
-    pub unverified_blocks_tx: Sender<LonelyBlockHash>,
+    pub unverified_blocks_tx: Sender<(LonelyBlock, HeaderView)>,
 }
 
 // Store the an unverified block to the database. We may usually do this
@@ -92,16 +92,24 @@ pub fn store_unverified_block(
 }
 
 impl ConsumeDescendantProcessor {
-    fn send_unverified_block(&self, lonely_block: LonelyBlockHash, total_difficulty: U256) {
-        let block_number = lonely_block.block_number_and_hash.number();
-        let block_hash = lonely_block.block_number_and_hash.hash();
+    fn send_unverified_block(
+        &self,
+        lonely_block: LonelyBlock,
+        parent_header: HeaderView,
+        total_difficulty: U256,
+    ) {
+        let block_number = lonely_block.block().number();
+        let block_hash = lonely_block.block().hash();
         if let Some(metrics) = ckb_metrics::handle() {
             metrics
                 .ckb_chain_unverified_block_ch_len
                 .set(self.unverified_blocks_tx.len() as i64)
         };
 
-        match self.unverified_blocks_tx.send(lonely_block) {
+        match self
+            .unverified_blocks_tx
+            .send((lonely_block, parent_header))
+        {
             Ok(_) => {
                 debug!(
                     "process desendant block success {}-{}",
@@ -142,13 +150,11 @@ impl ConsumeDescendantProcessor {
 
     pub(crate) fn process_descendant(&self, lonely_block: LonelyBlock) {
         match store_unverified_block(&self.shared, lonely_block.block().to_owned()) {
-            Ok((_parent_header, total_difficulty)) => {
+            Ok((parent_header, total_difficulty)) => {
                 self.shared
                     .insert_block_status(lonely_block.block().hash(), BlockStatus::BLOCK_STORED);
 
-                let lonely_block_hash: LonelyBlockHash = lonely_block.into();
-
-                self.send_unverified_block(lonely_block_hash, total_difficulty)
+                self.send_unverified_block(lonely_block, parent_header, total_difficulty)
             }
 
             Err(err) => {
@@ -185,7 +191,7 @@ impl ConsumeOrphan {
     pub(crate) fn new(
         shared: Shared,
         orphan_block_pool: Arc<OrphanBlockPool>,
-        unverified_blocks_tx: Sender<LonelyBlockHash>,
+        unverified_blocks_tx: Sender<(LonelyBlock, HeaderView)>,
         lonely_blocks_rx: Receiver<LonelyBlock>,
         stop_rx: Receiver<()>,
     ) -> ConsumeOrphan {
