@@ -95,11 +95,11 @@ impl ConsumeDescendantProcessor {
     fn send_unverified_block(&self, lonely_block: LonelyBlockHash, total_difficulty: U256) {
         let block_number = lonely_block.block_number_and_hash.number();
         let block_hash = lonely_block.block_number_and_hash.hash();
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics
-                .ckb_chain_unverified_block_ch_len
-                .set(self.unverified_blocks_tx.len() as i64)
-        };
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics
+        //         .ckb_chain_unverified_block_ch_len
+        //         .set(self.unverified_blocks_tx.len() as i64)
+        // };
 
         match self.unverified_blocks_tx.send(lonely_block) {
             Ok(_) => {
@@ -209,11 +209,11 @@ impl ConsumeOrphan {
                     Ok(lonely_block) => {
                         let lonely_block_epoch: EpochNumberWithFraction = lonely_block.block().epoch();
 
-                        let _trace_now = minstant::Instant::now();
+                        // let _trace_now = minstant::Instant::now();
                         self.process_lonely_block(lonely_block);
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_process_lonely_block_duration.observe(_trace_now.elapsed().as_secs_f64())
-                        }
+                        // if let Some(handle) = ckb_metrics::handle() {
+                        //     handle.ckb_chain_process_lonely_block_duration.observe(_trace_now.elapsed().as_secs_f64())
+                        // }
 
                         if lonely_block_epoch.number() > last_check_expired_orphans_epoch {
                             self.clean_expired_orphan_blocks();
@@ -300,10 +300,10 @@ impl ConsumeOrphan {
         }
         self.search_orphan_pool();
 
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics
-                .ckb_chain_orphan_count
-                .set(self.orphan_blocks_broker.len() as i64)
-        };
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics
+        //         .ckb_chain_orphan_count
+        //         .set(self.orphan_blocks_broker.len() as i64)
+        // };
     }
 }

@@ -74,44 +74,44 @@ impl HeaderMap {
     }
 
     pub fn contains_key(&self, hash: &Byte32) -> bool {
-        let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
-            metric
-                .ckb_header_map_ops_duration
-                .with_label_values(&["contains_key"])
-                .start_timer()
-        });
+        // let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
+        //     metric
+        //         .ckb_header_map_ops_duration
+        //         .with_label_values(&["contains_key"])
+        //         .start_timer()
+        // });
 
         self.inner.contains_key(hash)
     }
 
     pub fn get(&self, hash: &Byte32) -> Option<HeaderIndexView> {
-        let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
-            metric
-                .ckb_header_map_ops_duration
-                .with_label_values(&["get"])
-                .start_timer()
-        });
+        // let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
+        //     metric
+        //         .ckb_header_map_ops_duration
+        //         .with_label_values(&["get"])
+        //         .start_timer()
+        // });
         self.inner.get(hash)
     }
 
     pub fn insert(&self, view: HeaderIndexView) -> Option<()> {
-        let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
-            metric
-                .ckb_header_map_ops_duration
-                .with_label_values(&["insert"])
-                .start_timer()
-        });
+        // let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
+        //     metric
+        //         .ckb_header_map_ops_duration
+        //         .with_label_values(&["insert"])
+        //         .start_timer()
+        // });
 
         self.inner.insert(view)
     }
 
     pub fn remove(&self, hash: &Byte32) {
-        let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
-            metric
-                .ckb_header_map_ops_duration
-                .with_label_values(&["remove"])
-                .start_timer()
-        });
+        // let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle().map(|metric| {
+        //     metric
+        //         .ckb_header_map_ops_duration
+        //         .with_label_values(&["remove"])
+        //         .start_timer()
+        // });
 
         self.inner.remove(hash)
     }

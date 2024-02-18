@@ -87,14 +87,14 @@ where
             self.stats().tick_primary_contain();
         }
         if self.memory.contains_key(hash) {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_hit_miss_count.hit.inc()
-            }
+            // if let Some(metrics) = ckb_metrics::handle() {
+            //     metrics.ckb_header_map_memory_hit_miss_count.hit.inc()
+            // }
             return true;
         }
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
-        }
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
+        // }
 
         if self.backend.is_empty() {
             return false;
@@ -112,15 +112,15 @@ where
             self.stats().tick_primary_select();
         }
         if let Some(view) = self.memory.get_refresh(hash) {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_hit_miss_count.hit.inc();
-            }
+            // if let Some(metrics) = ckb_metrics::handle() {
+            //     metrics.ckb_header_map_memory_hit_miss_count.hit.inc();
+            // }
             return Some(view);
         }
 
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
-        }
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
+        // }
 
         if self.backend.is_empty() {
             return None;
@@ -166,8 +166,8 @@ where
     }
 
     pub(crate) fn limit_memory(&self) {
-        let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle()
-            .map(|handle| handle.ckb_header_map_limit_memory_duration.start_timer());
+        // let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle()
+        //     .map(|handle| handle.ckb_header_map_limit_memory_duration.start_timer());
 
         if let Some(values) = self.memory.front_n(self.memory_limit) {
             tokio::task::block_in_place(|| {

@@ -677,9 +677,9 @@ impl InflightBlocks {
                     key.number, key.hash, value.peer
                 );
 
-                if let Some(metrics) = ckb_metrics::handle() {
-                    metrics.ckb_inflight_timeout_count.inc();
-                }
+                // if let Some(metrics) = ckb_metrics::handle() {
+                //     metrics.ckb_inflight_timeout_count.inc();
+                // }
             }
         }
 

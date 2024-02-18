@@ -91,9 +91,9 @@ impl BlockFetcher {
     }
 
     pub fn fetch(self) -> Option<Vec<Vec<packed::Byte32>>> {
-        let _trace_timecost: Option<HistogramTimer> = {
-            ckb_metrics::handle().map(|handle| handle.ckb_sync_block_fetch_duration.start_timer())
-        };
+        // let _trace_timecost: Option<HistogramTimer> = {
+        //     ckb_metrics::handle().map(|handle| handle.ckb_sync_block_fetch_duration.start_timer())
+        // };
 
         if self.reached_inflight_limit() {
             trace!(
@@ -278,11 +278,11 @@ impl BlockFetcher {
         }
 
         let inflight_total_count = state.read_inflight_blocks().total_inflight_count();
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics
-                .ckb_inflight_blocks_count
-                .set(inflight_total_count as i64);
-        }
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics
+        //         .ckb_inflight_blocks_count
+        //         .set(inflight_total_count as i64);
+        // }
 
         if fetch.is_empty() {
             debug!(

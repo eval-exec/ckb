@@ -48,9 +48,9 @@ impl ChainService {
                         // no need to pause tx-pool's chunk_process here.
                         let _trace_now = minstant::Instant::now();
                         self.asynchronous_process_block(lonely_block);
-                        if let Some(handle) = ckb_metrics::handle(){
-                            handle.ckb_chain_async_process_block_duration.observe(_trace_now.elapsed().as_secs_f64())
-                        }
+                        // if let Some(handle) = ckb_metrics::handle(){
+                        //     handle.ckb_chain_async_process_block_duration.observe(_trace_now.elapsed().as_secs_f64())
+                        // }
                         let _ = responder.send(());
                     },
                     _ => {
@@ -127,11 +127,11 @@ impl ChainService {
             }
         }
 
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics
-                .ckb_chain_lonely_block_ch_len
-                .set(self.lonely_block_tx.len() as i64)
-        }
+        // if let Some(metrics) = ckb_metrics::handle() {
+        //     metrics
+        //         .ckb_chain_lonely_block_ch_len
+        //         .set(self.lonely_block_tx.len() as i64)
+        // }
 
         match self.lonely_block_tx.send(lonely_block) {
             Ok(_) => {

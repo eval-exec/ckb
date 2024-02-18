@@ -262,14 +262,14 @@ impl Synchronizer {
         peer: PeerIndex,
         message: packed::SyncMessageUnionReader<'_>,
     ) -> Status {
-        let _trace_timecost: Option<HistogramTimer> = {
-            ckb_metrics::handle().map(|handle| {
-                handle
-                    .ckb_sync_msg_process_duration
-                    .with_label_values(&[message.item_name()])
-                    .start_timer()
-            })
-        };
+        // let _trace_timecost: Option<HistogramTimer> = {
+        //     ckb_metrics::handle().map(|handle| {
+        //         handle
+        //             .ckb_sync_msg_process_duration
+        //             .with_label_values(&[message.item_name()])
+        //             .start_timer()
+        //     })
+        // };
 
         match message {
             packed::SyncMessageUnionReader::GetHeaders(reader) => {

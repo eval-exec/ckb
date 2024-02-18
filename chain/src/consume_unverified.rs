@@ -64,21 +64,21 @@ impl ConsumeUnverifiedBlocks {
 
     pub(crate) fn start(mut self) {
         loop {
-            let _trace_begin_loop = minstant::Instant::now();
+            // let _trace_begin_loop = minstant::Instant::now();
             select! {
                 recv(self.unverified_block_rx) -> msg => match msg {
                     Ok(unverified_task) => {
                         // process this unverified block
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_waiting_block_duration.observe(_trace_begin_loop.elapsed().as_secs_f64())
-                        }
+                        // if let Some(handle) = ckb_metrics::handle() {
+                        //     handle.ckb_chain_consume_unverified_block_waiting_block_duration.observe(_trace_begin_loop.elapsed().as_secs_f64())
+                        // }
                         let _ = self.tx_pool_controller.suspend_chunk_process();
 
-                        let _trace_now = minstant::Instant::now();
+                        // let _trace_now = minstant::Instant::now();
                         self.processor.consume_unverified_blocks(unverified_task);
-                        if let Some(handle) = ckb_metrics::handle() {
-                            handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
-                        }
+                        // if let Some(handle) = ckb_metrics::handle() {
+                        //     handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
+                        // }
 
                         let _ = self.tx_pool_controller.continue_chunk_process();
                     },

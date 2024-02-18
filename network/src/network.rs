@@ -201,9 +201,9 @@ impl NetworkState {
                 duration.as_secs(),
                 reason
             );
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_network_ban_peer.inc();
-            }
+            // if let Some(metrics) = ckb_metrics::handle() {
+            //     metrics.ckb_network_ban_peer.inc();
+            // }
             if let Some(peer) = self.with_peer_registry_mut(|reg| reg.remove_peer(session_id)) {
                 let message = format!("Ban for {} seconds, reason: {}", duration.as_secs(), reason);
                 self.peer_store.lock().ban_addr(
