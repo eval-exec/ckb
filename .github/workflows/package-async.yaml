@@ -1,0 +1,125 @@
+name: Package
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - 'pkg-async/*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  CKB_CLI_VERSION: v1.6.0
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-20.04
+    outputs:
+      upload_url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set tag
+        run: |
+          export GIT_TAG_NAME=` echo ${{ github.ref }} | awk -F '/' '{print $4}' `
+          echo "GIT_TAG_NAME=$GIT_TAG_NAME" >> $GITHUB_ENV
+      - name: Create release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.GIT_TAG_NAME}}
+          release_name: ${{ env.GIT_TAG_NAME}}
+          draft: true
+          prerelease: true
+
+  package-for-linux:
+    name: package-for-linux
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        include:
+          - rel_pkg: "x86_64-unknown-linux-gnu.tar.gz"
+            build_target: "prod"
+          - rel_pkg: "x86_64-unknown-linux-gnu-portable.tar.gz"
+            build_target: "prod_portable"
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set Env
+      run: |
+        export GIT_TAG_NAME=` echo ${{ github.ref }} | awk -F '/' '{print $4}' `
+        echo "GIT_TAG_NAME=$GIT_TAG_NAME" >> $GITHUB_ENV
+    - name: Build CKB and Package CKB
+      env:
+        LARGE_SECRET_PASSPHRASE: ${{ secrets.LARGE_SECRET_PASSPHRASE }}
+        QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+        QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+        GPG_SIGNER: ${{ secrets.GPG_SIGNER }}
+      run: |
+        export GIT_TAG_NAME=` echo ${{ github.ref }} | awk -F '/' '{print $4}' `
+        docker run --rm -i -w /ckb -v $(pwd):/ckb $BUILDER_IMAGE make ${{ matrix.build_target }}
+        devtools/ci/package.sh target/prod/ckb
+        mv ${{ github.workspace }}/releases/ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }} ${{ github.workspace }}
+        mv ${{ github.workspace }}/releases/ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }}.asc ${{ github.workspace }}
+    - name: upload-zip-file
+      uses: actions/upload-artifact@v2
+      with:
+        name: ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }}
+        path: ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }}
+    - name: upload-asc-file
+      uses: actions/upload-artifact@v2
+      with:
+        name: ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }}.asc
+        path: ckb_${{env.GIT_TAG_NAME }}_${{env.REL_PKG }}.asc
+    env:
+      BUILDER_IMAGE: nervos/ckb-docker-builder:bionic-rust-1.71.1-openssl-3.1.3
+      REL_PKG: ${{ matrix.rel_pkg }}
+
+  Upload_File:
+    name: Upload_Zip_File
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        include:
+          - REL_PKG: x86_64-unknown-linux-gnu.tar.gz
+          - REL_PKG: x86_64-unknown-linux-gnu-portable.tar.gz
+    needs:
+      - create-release
+      - package-for-linux
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set tag
+      run: |
+        export GIT_TAG_NAME=` echo ${{ github.ref }} | awk -F '/' '{print $4}' `
+        echo "GIT_TAG_NAME=$GIT_TAG_NAME" >> $GITHUB_ENV
+    - name: Prepare - Download tar
+      uses: actions/download-artifact@v2
+      with:
+        name: ckb_${{env.GIT_TAG_NAME}}_${{ matrix.REL_PKG }}
+    - name: Prepare - Download asc
+      uses: actions/download-artifact@v2
+      with:
+        name: ckb_${{env.GIT_TAG_NAME}}_${{ matrix.REL_PKG }}.asc
+    - name: Upload tar assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_name: ckb_${{env.GIT_TAG_NAME}}_${{ matrix.REL_PKG }}
+        asset_path: ${{ github.workspace }}/ckb_${{env.GIT_TAG_NAME }}_${{ matrix.REL_PKG }}
+        asset_content_type: application/octet-stream
+    - name: Upload asc assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_name: ckb_${{env.GIT_TAG_NAME}}_${{ matrix.REL_PKG }}.asc
+        asset_path: ${{ github.workspace }}/ckb_${{env.GIT_TAG_NAME }}_${{ matrix.REL_PKG }}.asc
+        asset_content_type: application/octet-stream
+
