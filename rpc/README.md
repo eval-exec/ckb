@@ -6516,6 +6516,14 @@ The overall chain synchronization state of this local node.
 
     If this number is too high, it indicates that block download has stuck at some block.
 
+* `tip_hash`: [`H256`](#type-h256) - The block hash of current tip block
+
+* `tip_number`: [`Uint64`](#type-uint64) - The block number of current tip block
+
+* `unverified_tip_hash`: [`H256`](#type-h256) - The block hash of current unverified tip block
+
+* `unverified_tip_number`: [`Uint64`](#type-uint64) - The block number of current unverified tip block
+
 ### Type `Timestamp`
 
 The Unix timestamp in milliseconds (1 second is 1000 milliseconds).
