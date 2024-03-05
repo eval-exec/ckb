@@ -33,8 +33,9 @@ ckb-constant = { path = "../util/constant", version = "= 0.114.0-pre" }
 ckb-util = { path = "../util", version = "= 0.114.0-pre" }
 crossbeam = "0.8.2"
 ckb-network = { path = "../network", version = "= 0.114.0-pre" }
-ckb-tx-pool = { path = "../tx-pool", version = "= 0.114.0-pre"}
+ckb-tx-pool = { path = "../tx-pool", version = "= 0.114.0-pre" }
 minstant = "0.1.4"
+dashmap = "4.0"
 
 [dev-dependencies]
 ckb-test-chain-utils = { path = "../util/test-chain-utils", version = "= 0.114.0-pre" }
@@ -45,7 +46,7 @@ ckb-jsonrpc-types = { path = "../util/jsonrpc-types", version = "= 0.114.0-pre" 
 ckb-network = { path = "../network", version = "= 0.114.0-pre" }
 lazy_static = "1.4"
 tempfile.workspace = true
-ckb-systemtime = { path = "../util/systemtime", version = "= 0.114.0-pre" ,features = ["enable_faketime"]}
+ckb-systemtime = { path = "../util/systemtime", version = "= 0.114.0-pre", features = ["enable_faketime"] }
 
 [features]
 default = []
