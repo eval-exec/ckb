@@ -715,6 +715,7 @@ dependencies = [
  "ckb-verification-contextual",
  "ckb-verification-traits",
  "crossbeam",
+ "dashmap",
  "faux",
  "lazy_static",
  "minstant",
