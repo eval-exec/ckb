@@ -1,7 +1,9 @@
 #![allow(dead_code)]
+use crate::tests::util::start_chain;
 use crate::LonelyBlock;
 use ckb_chain_spec::consensus::ConsensusBuilder;
 use ckb_systemtime::unix_time_as_millis;
+use ckb_test_chain_utils::MockChain;
 use ckb_types::core::{BlockBuilder, BlockView, EpochNumberWithFraction, HeaderView};
 use ckb_types::prelude::*;
 use std::collections::HashSet;
@@ -102,6 +104,8 @@ fn test_remove_blocks_by_parent() {
 #[test]
 fn test_remove_blocks_by_parent_and_get_block_should_not_deadlock() {
     let consensus = ConsensusBuilder::default().build();
+    let (_chain_controller, shared, _parent) = start_chain(Some(consensus));
+
     let pool = OrphanBlockPool::with_capacity(1024);
     let mut header = consensus.genesis_block().header();
     let mut hashes = Vec::new();
@@ -113,10 +117,17 @@ fn test_remove_blocks_by_parent_and_get_block_should_not_deadlock() {
             switch: None,
             verify_callback: None,
         };
-        pool.insert(new_block_clone);
+        let db_txn = shared.store().begin_transaction();
+        db_txn
+            .insert_block(new_block_clone.block())
+            .expect("must insert success");
+        db_txn.commit().expect("must commit success");
+        pool.insert(new_block_clone.into());
         header = new_block.header();
         hashes.push(header.hash());
     }
+
+    let mock_chain = MockChain::new(consensus.genesis_block().header(), &consensus);
 
     let pool_arc1 = Arc::new(pool);
     let pool_arc2 = Arc::clone(&pool_arc1);
@@ -126,7 +137,7 @@ fn test_remove_blocks_by_parent_and_get_block_should_not_deadlock() {
     });
 
     for hash in hashes.iter().rev() {
-        pool_arc2.get_block(hash);
+        pool_arc2.get_block(shared.store(), hash);
     }
 
     thread1.join().unwrap();
@@ -149,27 +160,33 @@ fn test_leaders() {
         blocks.push(lonely_block);
         parent = new_block.block().header();
         if i % 5 != 0 {
-            pool.insert(new_block);
+            pool.insert(new_block.into());
         }
     }
     assert_leaders_have_children(&pool);
     assert_eq!(pool.len(), 15);
     assert_eq!(pool.leaders_len(), 4);
 
-    pool.insert(LonelyBlock {
-        block: Arc::clone(blocks[5].block()),
-        switch: None,
-        verify_callback: None,
-    });
+    pool.insert(
+        LonelyBlock {
+            block: Arc::clone(blocks[5].block()),
+            switch: None,
+            verify_callback: None,
+        }
+        .into(),
+    );
     assert_leaders_have_children(&pool);
     assert_eq!(pool.len(), 16);
     assert_eq!(pool.leaders_len(), 3);
 
-    pool.insert(LonelyBlock {
-        block: Arc::clone(blocks[10].block()),
-        switch: None,
-        verify_callback: None,
-    });
+    pool.insert(
+        LonelyBlock {
+            block: Arc::clone(blocks[10].block()),
+            switch: None,
+            verify_callback: None,
+        }
+        .into(),
+    );
     assert_leaders_have_children(&pool);
     assert_eq!(pool.len(), 17);
     assert_eq!(pool.leaders_len(), 2);
@@ -180,11 +197,14 @@ fn test_leaders() {
     assert_eq!(pool.len(), 17);
     assert_eq!(pool.leaders_len(), 2);
 
-    pool.insert(LonelyBlock {
-        block: Arc::clone(blocks[0].block()),
-        switch: None,
-        verify_callback: None,
-    });
+    pool.insert(
+        LonelyBlock {
+            block: Arc::clone(blocks[0].block()),
+            switch: None,
+            verify_callback: None,
+        }
+        .into(),
+    );
     assert_leaders_have_children(&pool);
     assert_eq!(pool.len(), 18);
     assert_eq!(pool.leaders_len(), 2);
@@ -193,11 +213,14 @@ fn test_leaders() {
     assert_eq!(pool.len(), 3);
     assert_eq!(pool.leaders_len(), 1);
 
-    pool.insert(LonelyBlock {
-        block: Arc::clone(blocks[15].block()),
-        switch: None,
-        verify_callback: None,
-    });
+    pool.insert(
+        LonelyBlock {
+            block: Arc::clone(blocks[15].block()),
+            switch: None,
+            verify_callback: None,
+        }
+        .into(),
+    );
     assert_leaders_have_children(&pool);
     assert_eq!(pool.len(), 4);
     assert_eq!(pool.leaders_len(), 1);

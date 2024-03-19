@@ -1,7 +1,7 @@
 //! CKB chain service.
 #![allow(missing_docs)]
 
-use crate::{LonelyBlock, ProcessBlockRequest};
+use crate::{LonelyBlock, LonelyBlockHash, ProcessBlockRequest};
 use ckb_channel::{select, Receiver, Sender};
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::{self, debug, error, info, warn};
@@ -19,7 +19,7 @@ pub(crate) struct ChainService {
 
     process_block_rx: Receiver<ProcessBlockRequest>,
 
-    lonely_block_tx: Sender<LonelyBlock>,
+    lonely_block_tx: Sender<LonelyBlockHash>,
 }
 impl ChainService {
     /// Create a new ChainService instance with shared.
@@ -27,7 +27,7 @@ impl ChainService {
         shared: Shared,
         process_block_rx: Receiver<ProcessBlockRequest>,
 
-        lonely_block_tx: Sender<LonelyBlock>,
+        lonely_block_tx: Sender<LonelyBlockHash>,
     ) -> ChainService {
         ChainService {
             shared,
@@ -133,7 +133,27 @@ impl ChainService {
                 .set(self.lonely_block_tx.len() as i64)
         }
 
-        match self.lonely_block_tx.send(lonely_block) {
+        let db_txn = self.shared.store().begin_transaction();
+        if let Err(err) = db_txn.insert_block(lonely_block.block()) {
+            self.shared.remove_block_status(&block_hash);
+            error!(
+                "block {}-{} insert error {:?}",
+                block_number, block_hash, err
+            );
+            return;
+        }
+        if let Err(err) = db_txn.commit() {
+            self.shared.remove_block_status(&block_hash);
+            error!(
+                "block {}-{} commit error {:?}",
+                block_number, block_hash, err
+            );
+            return;
+        }
+
+        let lonely_block_hash: LonelyBlockHash = lonely_block.into();
+
+        match self.lonely_block_tx.send(lonely_block_hash) {
             Ok(_) => {
                 debug!(
                     "processing block: {}-{}, (tip:unverified_tip):({}:{})",

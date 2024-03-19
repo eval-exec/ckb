@@ -130,6 +130,8 @@ impl ConsumeUnverifiedBlockProcessor {
     pub(crate) fn consume_unverified_blocks(&mut self, lonely_block_hash: LonelyBlockHash) {
         let LonelyBlockHash {
             block_number_and_hash,
+            parent_hash: _,
+            epoch_number: _,
             switch,
             verify_callback,
         } = lonely_block_hash;

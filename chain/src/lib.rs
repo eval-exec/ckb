@@ -10,7 +10,7 @@
 use ckb_error::Error;
 use ckb_shared::types::BlockNumberAndHash;
 use ckb_types::core::service::Request;
-use ckb_types::core::{BlockNumber, BlockView};
+use ckb_types::core::{BlockNumber, BlockView, EpochNumber};
 use ckb_types::packed::Byte32;
 use ckb_verification_traits::Switch;
 use std::sync::Arc;
@@ -67,6 +67,10 @@ pub struct LonelyBlock {
 pub struct LonelyBlockHash {
     /// block
     pub block_number_and_hash: BlockNumberAndHash,
+    /// parent hash
+    pub parent_hash: Byte32,
+
+    pub epoch_number: EpochNumber,
 
     /// The Switch to control the verification process
     pub switch: Option<Switch>,
@@ -82,9 +86,40 @@ impl From<LonelyBlock> for LonelyBlockHash {
                 number: val.block.number(),
                 hash: val.block.hash(),
             },
+            epoch_number: val.block.epoch().number(),
+
+            parent_hash: val.block.parent_hash(),
             switch: val.switch,
             verify_callback: val.verify_callback,
         }
+    }
+}
+
+impl LonelyBlockHash {
+    pub fn execute_callback(self, verify_result: VerifyResult) {
+        if let Some(verify_callback) = self.verify_callback {
+            verify_callback(verify_result);
+        }
+    }
+
+    pub fn epoch_number(&self) -> EpochNumber {
+        self.epoch_number
+    }
+
+    pub fn number_hash(&self) -> BlockNumberAndHash {
+        self.block_number_and_hash.clone()
+    }
+
+    pub fn hash(&self) -> Byte32 {
+        self.block_number_and_hash.hash()
+    }
+
+    pub fn number(&self) -> BlockNumber {
+        self.block_number_and_hash.number()
+    }
+
+    pub fn parent_hash(&self) -> Byte32 {
+        self.parent_hash.clone()
     }
 }
 

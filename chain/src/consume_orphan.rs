@@ -3,18 +3,19 @@
 use crate::utils::orphan_block_pool::OrphanBlockPool;
 use crate::{LonelyBlock, LonelyBlockHash};
 use ckb_channel::{select, Receiver, Sender};
-use ckb_error::Error;
+use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::internal::trace;
 use ckb_logger::{debug, error, info};
 use ckb_shared::block_status::BlockStatus;
 use ckb_shared::Shared;
 use ckb_store::ChainStore;
 use ckb_systemtime::unix_time_as_millis;
-use ckb_types::core::{BlockExt, BlockView, EpochNumber, EpochNumberWithFraction, HeaderView};
+use ckb_types::core::{BlockExt, BlockView, EpochNumber, HeaderView};
+use ckb_types::packed::Byte32;
 use ckb_types::U256;
 use ckb_verification::InvalidParentError;
-use std::sync::Arc;
 use dashmap::mapref::entry::Entry;
+use std::sync::Arc;
 
 pub(crate) struct ConsumeDescendantProcessor {
     pub shared: Shared,
@@ -73,8 +74,6 @@ pub fn store_unverified_block(
         parent_ext.total_difficulty.to_owned() + block.header().difficulty();
 
     let db_txn = Arc::new(shared.store().begin_transaction());
-
-    db_txn.insert_block(block.as_ref())?;
 
     let next_block_epoch = shared
         .consensus()
@@ -157,7 +156,15 @@ impl ConsumeDescendantProcessor {
         }
     }
 
-    pub(crate) fn process_descendant(&self, lonely_block: LonelyBlock) -> Result<(), Error> {
+    fn load_block_view(&self, block_hash: &Byte32) -> Result<BlockView, Error> {
+        self.shared.store().get_block(block_hash).ok_or_else(|| {
+            InternalErrorKind::Database
+                .other(format!("block {} not found", block_hash))
+                .into()
+        })
+    }
+
+    pub(crate) fn process_descendant_block(&self, lonely_block: LonelyBlock) -> Result<(), Error> {
         return match store_unverified_block(&self.shared, lonely_block.block().to_owned()) {
             Ok((_parent_header, total_difficulty)) => {
                 self.shared
@@ -182,18 +189,34 @@ impl ConsumeDescendantProcessor {
         };
     }
 
-    fn accept_descendants(&self, descendants: Vec<LonelyBlock>) {
+    pub(crate) fn process_descendant_hash(
+        &self,
+        lonely_block_hash: LonelyBlockHash,
+    ) -> Result<(), Error> {
+        let lonely_block_view = self
+            .load_block_view(&lonely_block_hash.hash())
+            .expect("lonely block must be stored");
+        let lonely_block = LonelyBlock {
+            block: Arc::new(lonely_block_view),
+            switch: lonely_block_hash.switch,
+            verify_callback: lonely_block_hash.verify_callback,
+        };
+
+        self.process_descendant_block(lonely_block)
+    }
+
+    fn accept_descendants(&self, descendants: Vec<LonelyBlockHash>) {
         let mut has_parent_invalid_error = false;
         for descendant_block in descendants {
-            let block_number = descendant_block.block().number();
-            let block_hash = descendant_block.block().hash();
+            let block_number = descendant_block.block_number_and_hash.number();
+            let block_hash = descendant_block.block_number_and_hash.hash();
 
             if has_parent_invalid_error {
                 self.shared
                     .block_status_map()
                     .insert(block_hash.clone(), BlockStatus::BLOCK_INVALID);
                 let err = Err(InvalidParentError {
-                    parent_hash: descendant_block.block().parent_hash(),
+                    parent_hash: descendant_block.parent_hash(),
                 }
                 .into());
 
@@ -208,7 +231,7 @@ impl ConsumeDescendantProcessor {
                 continue;
             }
 
-            if let Err(err) = self.process_descendant(descendant_block) {
+            if let Err(err) = self.process_descendant_hash(descendant_block) {
                 error!(
                     "process descendant {}-{}, failed {:?}",
                     block_number, block_hash, err
@@ -228,7 +251,7 @@ pub(crate) struct ConsumeOrphan {
     descendant_processor: ConsumeDescendantProcessor,
 
     orphan_blocks_broker: Arc<OrphanBlockPool>,
-    lonely_blocks_rx: Receiver<LonelyBlock>,
+    lonely_blocks_rx: Receiver<LonelyBlockHash>,
 
     stop_rx: Receiver<()>,
 }
@@ -238,7 +261,7 @@ impl ConsumeOrphan {
         shared: Shared,
         orphan_block_pool: Arc<OrphanBlockPool>,
         unverified_blocks_tx: Sender<LonelyBlockHash>,
-        lonely_blocks_rx: Receiver<LonelyBlock>,
+        lonely_blocks_rx: Receiver<LonelyBlockHash>,
         stop_rx: Receiver<()>,
     ) -> ConsumeOrphan {
         ConsumeOrphan {
@@ -259,7 +282,7 @@ impl ConsumeOrphan {
             select! {
                 recv(self.lonely_blocks_rx) -> msg => match msg {
                     Ok(lonely_block) => {
-                        let lonely_block_epoch: EpochNumberWithFraction = lonely_block.block().epoch();
+                        let lonely_block_epoch_number: EpochNumber = lonely_block.epoch_number();
 
                         let _trace_now = minstant::Instant::now();
                         self.process_lonely_block(lonely_block);
@@ -267,9 +290,9 @@ impl ConsumeOrphan {
                             handle.ckb_chain_process_lonely_block_duration.observe(_trace_now.elapsed().as_secs_f64())
                         }
 
-                        if lonely_block_epoch.number() > last_check_expired_orphans_epoch {
+                        if lonely_block_epoch_number > last_check_expired_orphans_epoch {
                             self.clean_expired_orphan_blocks();
-                            last_check_expired_orphans_epoch = lonely_block_epoch.number();
+                            last_check_expired_orphans_epoch = lonely_block_epoch_number;
                         }
                     },
                     Err(err) => {
@@ -311,7 +334,7 @@ impl ConsumeOrphan {
                 continue;
             }
 
-            let descendants: Vec<LonelyBlock> = self
+            let descendants: Vec<LonelyBlockHash> = self
                 .orphan_blocks_broker
                 .remove_blocks_by_parent(&leader_hash);
             if descendants.is_empty() {
@@ -325,11 +348,11 @@ impl ConsumeOrphan {
         }
     }
 
-    fn process_lonely_block(&self, lonely_block: LonelyBlock) {
-        let parent_hash = lonely_block.block().parent_hash();
-        let block_hash = lonely_block.block().hash();
-        let block_number = lonely_block.block().number();
-        
+    fn process_lonely_block(&self, lonely_block_hash: LonelyBlockHash) {
+        let parent_hash = lonely_block_hash.parent_hash();
+        let block_hash = lonely_block_hash.hash();
+        let block_number = lonely_block_hash.number();
+
         {
             // Is this block still verifying by ConsumeUnverified?
             // If yes, skip it.
@@ -338,7 +361,7 @@ impl ConsumeOrphan {
                 if entry.get().eq(&BlockStatus::BLOCK_STORED) {
                     debug!(
                         "in process_lonely_block, {} is BLOCK_STORED in block_status_map, it is still verifying by ConsumeUnverified thread",
-                        block_hash, 
+                        block_hash,
                     );
                     return;
                 }
@@ -354,7 +377,10 @@ impl ConsumeOrphan {
                 parent_hash, parent_status, block_number, block_hash,
             );
 
-            if let Err(err) = self.descendant_processor.process_descendant(lonely_block) {
+            if let Err(err) = self
+                .descendant_processor
+                .process_descendant_hash(lonely_block_hash)
+            {
                 error!(
                     "process descendant {}-{}, failed {:?}",
                     block_number, block_hash, err
@@ -368,14 +394,14 @@ impl ConsumeOrphan {
             );
             self.shared
                 .block_status_map()
-                .insert(lonely_block.block().hash(), BlockStatus::BLOCK_INVALID);
+                .insert(block_hash, BlockStatus::BLOCK_INVALID);
             let err = Err(InvalidParentError {
                 parent_hash: parent_hash.clone(),
             }
             .into());
-            lonely_block.execute_callback(err);
+            lonely_block_hash.execute_callback(err);
         } else {
-            self.orphan_blocks_broker.insert(lonely_block);
+            self.orphan_blocks_broker.insert(lonely_block_hash);
         }
         self.search_orphan_pool();
 
