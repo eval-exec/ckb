@@ -5,7 +5,7 @@ use crate::chain_service::ChainService;
 use crate::consume_unverified::ConsumeUnverifiedBlocks;
 use crate::init_load_unverified::InitLoadUnverified;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{ChainController, LonelyBlock, LonelyBlockHash};
+use crate::{ChainController, LonelyBlockHash};
 use ckb_channel::{self as channel, SendError};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
 use ckb_logger::warn;
@@ -45,7 +45,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         .expect("start unverified_queue consumer thread should ok");
 
     let (lonely_block_tx, lonely_block_rx) =
-        channel::bounded::<LonelyBlock>(BLOCK_DOWNLOAD_WINDOW as usize);
+        channel::bounded::<LonelyBlockHash>(BLOCK_DOWNLOAD_WINDOW as usize);
 
     let (search_orphan_pool_stop_tx, search_orphan_pool_stop_rx) = ckb_channel::bounded::<()>(1);
 

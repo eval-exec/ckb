@@ -1,6 +1,7 @@
 #![allow(dead_code)]
-use crate::LonelyBlock;
+use crate::LonelyBlockHash;
 use ckb_logger::debug;
+use ckb_store::{ChainDB, ChainStore};
 use ckb_types::core::{BlockView, EpochNumber};
 use ckb_types::packed;
 use ckb_util::{parking_lot::RwLock, shrink_to_fit};
@@ -15,7 +16,7 @@ const EXPIRED_EPOCH: u64 = 6;
 #[derive(Default)]
 struct InnerPool {
     // Group by blocks in the pool by the parent hash.
-    blocks: HashMap<ParentHash, HashMap<packed::Byte32, LonelyBlock>>,
+    blocks: HashMap<ParentHash, HashMap<packed::Byte32, LonelyBlockHash>>,
     // The map tells the parent hash when given the hash of a block in the pool.
     //
     // The block is in the orphan pool if and only if the block hash exists as a key in this map.
@@ -33,9 +34,9 @@ impl InnerPool {
         }
     }
 
-    fn insert(&mut self, lonely_block: LonelyBlock) {
-        let hash = lonely_block.block().header().hash();
-        let parent_hash = lonely_block.block().data().header().raw().parent_hash();
+    fn insert(&mut self, lonely_block: LonelyBlockHash) {
+        let hash = lonely_block.hash();
+        let parent_hash = lonely_block.parent_hash();
         self.blocks
             .entry(parent_hash.clone())
             .or_default()
@@ -53,7 +54,7 @@ impl InnerPool {
         self.parents.insert(hash, parent_hash);
     }
 
-    pub fn remove_blocks_by_parent(&mut self, parent_hash: &ParentHash) -> Vec<LonelyBlock> {
+    pub fn remove_blocks_by_parent(&mut self, parent_hash: &ParentHash) -> Vec<LonelyBlockHash> {
         // try remove leaders first
         if !self.leaders.remove(parent_hash) {
             return Vec::new();
@@ -62,7 +63,7 @@ impl InnerPool {
         let mut queue: VecDeque<packed::Byte32> = VecDeque::new();
         queue.push_back(parent_hash.to_owned());
 
-        let mut removed: Vec<LonelyBlock> = Vec::new();
+        let mut removed: Vec<LonelyBlockHash> = Vec::new();
         while let Some(parent_hash) = queue.pop_front() {
             if let Some(orphaned) = self.blocks.remove(&parent_hash) {
                 let (hashes, blocks): (Vec<_>, Vec<_>) = orphaned.into_iter().unzip();
@@ -87,12 +88,16 @@ impl InnerPool {
         removed
     }
 
-    pub fn get_block(&self, hash: &packed::Byte32) -> Option<Arc<BlockView>> {
+    pub fn get_block(&self, store: &ChainDB, hash: &packed::Byte32) -> Option<Arc<BlockView>> {
         self.parents.get(hash).and_then(|parent_hash| {
             self.blocks.get(parent_hash).and_then(|blocks| {
                 blocks
                     .get(hash)
-                    .map(|lonely_block| Arc::clone(lonely_block.block()))
+                    .map(|lonely_block| {
+                        let block_view: Option<BlockView> = store.get_block(&lonely_block.hash());
+                        block_view.map(|b| Arc::new(b))
+                    })
+                    .unwrap_or_default()
             })
         })
     }
@@ -109,11 +114,7 @@ impl InnerPool {
             if self.need_clean(hash, tip_epoch) {
                 // remove items in orphan pool and return hash to callee(clean header map)
                 let descendants = self.remove_blocks_by_parent(hash);
-                result.extend(
-                    descendants
-                        .iter()
-                        .map(|lonely_block| lonely_block.block().hash()),
-                );
+                result.extend(descendants.iter().map(|lonely_block| lonely_block.hash()));
             }
         }
         result
@@ -125,7 +126,7 @@ impl InnerPool {
             .get(parent_hash)
             .and_then(|map| {
                 map.iter().next().map(|(_, lonely_block)| {
-                    lonely_block.block().header().epoch().number() + EXPIRED_EPOCH < tip_epoch
+                    lonely_block.epoch_number() + EXPIRED_EPOCH < tip_epoch
                 })
             })
             .unwrap_or_default()
@@ -148,16 +149,16 @@ impl OrphanBlockPool {
     }
 
     /// Insert orphaned block, for which we have already requested its parent block
-    pub fn insert(&self, lonely_block: LonelyBlock) {
+    pub fn insert(&self, lonely_block: LonelyBlockHash) {
         self.inner.write().insert(lonely_block);
     }
 
-    pub fn remove_blocks_by_parent(&self, parent_hash: &ParentHash) -> Vec<LonelyBlock> {
+    pub fn remove_blocks_by_parent(&self, parent_hash: &ParentHash) -> Vec<LonelyBlockHash> {
         self.inner.write().remove_blocks_by_parent(parent_hash)
     }
 
-    pub fn get_block(&self, hash: &packed::Byte32) -> Option<Arc<BlockView>> {
-        self.inner.read().get_block(hash)
+    pub fn get_block(&self, store: &ChainDB, hash: &packed::Byte32) -> Option<Arc<BlockView>> {
+        self.inner.read().get_block(store, hash)
     }
 
     pub fn contains_block(&self, hash: &packed::Byte32) -> bool {
