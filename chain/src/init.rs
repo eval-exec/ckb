@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 
-const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW * 2) as usize;
+const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW) as usize;
 
 pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
     let orphan_blocks_broker = Arc::new(OrphanBlockPool::with_capacity(ORPHAN_BLOCK_SIZE));
@@ -68,7 +68,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         })
         .expect("start search_orphan_pool thread should ok");
 
-    let (process_block_tx, process_block_rx) = channel::bounded(BLOCK_DOWNLOAD_WINDOW as usize);
+    let (process_block_tx, process_block_rx) = channel::bounded(0);
 
     let is_verifying_unverified_blocks_on_startup = Arc::new(AtomicBool::new(true));
 
