@@ -5,7 +5,7 @@ use crate::chain_service::ChainService;
 use crate::consume_unverified::ConsumeUnverifiedBlocks;
 use crate::init_load_unverified::InitLoadUnverified;
 use crate::utils::orphan_block_pool::OrphanBlockPool;
-use crate::{ChainController, LonelyBlock, LonelyBlockHash};
+use crate::{ChainController, LonelyBlockHash};
 use ckb_channel::{self as channel, SendError};
 use ckb_constant::sync::BLOCK_DOWNLOAD_WINDOW;
 use ckb_logger::warn;
@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 
-const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW * 2) as usize;
+const ORPHAN_BLOCK_SIZE: usize = (BLOCK_DOWNLOAD_WINDOW) as usize;
 
 pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
     let orphan_blocks_broker = Arc::new(OrphanBlockPool::with_capacity(ORPHAN_BLOCK_SIZE));
@@ -45,7 +45,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         .expect("start unverified_queue consumer thread should ok");
 
     let (lonely_block_tx, lonely_block_rx) =
-        channel::bounded::<LonelyBlock>(BLOCK_DOWNLOAD_WINDOW as usize);
+        channel::bounded::<LonelyBlockHash>(BLOCK_DOWNLOAD_WINDOW as usize);
 
     let (search_orphan_pool_stop_tx, search_orphan_pool_stop_rx) = ckb_channel::bounded::<()>(1);
 
@@ -68,7 +68,7 @@ pub fn start_chain_services(builder: ChainServicesBuilder) -> ChainController {
         })
         .expect("start search_orphan_pool thread should ok");
 
-    let (process_block_tx, process_block_rx) = channel::bounded(BLOCK_DOWNLOAD_WINDOW as usize);
+    let (process_block_tx, process_block_rx) = channel::bounded(0);
 
     let is_verifying_unverified_blocks_on_startup = Arc::new(AtomicBool::new(true));
 
