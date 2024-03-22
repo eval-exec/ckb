@@ -11,6 +11,7 @@ mod replay;
 mod reset_data;
 mod run;
 mod stats;
+mod truncate_block;
 
 #[cfg(not(target_os = "windows"))]
 pub use self::daemon::{check_process, daemon};
@@ -25,3 +26,4 @@ pub use self::replay::replay;
 pub use self::reset_data::reset_data;
 pub use self::run::run;
 pub use self::stats::stats;
+pub use self::truncate_block::truncate_block;

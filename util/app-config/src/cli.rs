@@ -24,6 +24,8 @@ pub const CMD_STATS: &str = "stats";
 pub const CMD_LIST_HASHES: &str = "list-hashes";
 /// Subcommand `reset-data`.
 pub const CMD_RESET_DATA: &str = "reset-data";
+/// Subcommand `truncate-data`.
+pub const CMD_TRUNCATE_BLOCK: &str = "truncate-block";
 /// Subcommand `peer-id`.
 pub const CMD_PEERID: &str = "peer-id";
 /// Subcommand `gen`.
@@ -154,7 +156,9 @@ pub fn basic_app() -> Command {
         .subcommand(stats())
         .subcommand(reset_data())
         .subcommand(peer_id())
-        .subcommand(migrate());
+        .subcommand(migrate())
+        .subcommand(truncate_block())
+        ;
 
     #[cfg(not(target_os = "windows"))]
     let command = command.subcommand(daemon());
@@ -440,6 +444,18 @@ fn daemon() -> Command {
                 .action(clap::ArgAction::SetTrue)
                 .conflicts_with(ARG_DAEMON_CHECK)
                 .help("Stop the daemon process, both the miner and the node"),
+        )
+}
+
+fn truncate_block() -> Command {
+    Command::new(CMD_TRUNCATE_BLOCK)
+        .about("Truncate blocks to target")
+        .arg(
+            Arg::new(ARG_TARGET)
+                .long(ARG_TARGET)
+                .action(clap::ArgAction::Set)
+                .value_parser(clap::value_parser!(u64))
+                .help("the target which ckb should be truncated to"),
         )
 }
 

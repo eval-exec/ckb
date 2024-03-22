@@ -138,6 +138,9 @@ fn run_app_inner(
         cli::CMD_MIGRATE => subcommand::migrate(setup.migrate(matches)?),
         #[cfg(not(target_os = "windows"))]
         cli::CMD_DAEMON => subcommand::daemon(setup.daemon(matches)?),
+        cli::CMD_TRUNCATE_BLOCK => {
+            subcommand::truncate_block(setup.truncate_block(matches)?, handle.clone())
+        }
         _ => unreachable!(),
     };
 

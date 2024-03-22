@@ -27,9 +27,9 @@ use std::cmp;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub(crate) struct ConsumeUnverifiedBlockProcessor {
-    pub(crate) shared: Shared,
-    pub(crate) proposal_table: ProposalTable,
+pub struct ConsumeUnverifiedBlockProcessor {
+    pub shared: Shared,
+    pub proposal_table: ProposalTable,
 }
 
 pub(crate) struct ConsumeUnverifiedBlocks {
@@ -818,7 +818,20 @@ impl ConsumeUnverifiedBlockProcessor {
 
     // Truncate the main chain
     // Use for testing only
-    pub(crate) fn truncate(&mut self, target_tip_hash: &Byte32) -> Result<(), Error> {
+    pub fn truncate_tip(&mut self) -> Result<(), Error> {
+        let tip_number = self.shared.snapshot().tip_header().number();
+        let tip_hash = self.shared.snapshot().tip_hash();
+        let tip_parent_hash = self.shared.snapshot().tip_header().parent_hash();
+        if tip_number == 0 {
+            info!("current tip is genesis block: {}-{}", tip_number, tip_hash,);
+            return Ok(());
+        }
+        self.truncate(&tip_parent_hash)
+    }
+
+    // Truncate the main chain
+    // Use for testing only
+    pub fn truncate(&mut self, target_tip_hash: &Byte32) -> Result<(), Error> {
         let snapshot = Arc::clone(&self.shared.snapshot());
         assert!(snapshot.is_main_chain(target_tip_hash));
 
@@ -833,6 +846,11 @@ impl ConsumeUnverifiedBlockProcessor {
 
         let db_txn = self.shared.store().begin_transaction();
         self.rollback(&fork, &db_txn)?;
+
+        for block in fork.detached_blocks().iter().rev() {
+            db_txn.delete_block_ext(&block.hash())?;
+            db_txn.delete_block(block)?;
+        }
 
         db_txn.insert_tip_header(&target_tip_header)?;
         db_txn.insert_current_epoch_ext(&target_epoch_ext)?;

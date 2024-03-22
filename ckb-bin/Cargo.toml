@@ -38,6 +38,7 @@ ckb-verification-traits = { path = "../verification/traits", version = "= 0.115.
 ckb-async-runtime = { path = "../util/runtime", version = "= 0.115.0-pre" }
 ckb-migrate = { path = "../util/migrate", version = "= 0.115.0-pre" }
 ckb-launcher = { path = "../util/launcher", version = "= 0.115.0-pre" }
+ckb-proposal-table = { path = "../util/proposal-table", version = "= 0.115.0-pre" }
 base64 = "0.21.0"
 tempfile.workspace = true
 rayon = "1.0"

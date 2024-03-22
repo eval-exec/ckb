@@ -96,6 +96,15 @@ pub struct MinerArgs {
 }
 
 /// Parsed command line arguments for `ckb stats`.
+pub struct TruncateBlockArgs {
+    /// Parsed `ckb.toml`.
+    pub config: Box<CKBAppConfig>,
+    /// Loaded consensus.
+    pub consensus: Consensus,
+    /// Specifies the target block hash want to truncate to.
+    pub target: Option<u64>,
+}
+/// Parsed command line arguments for `ckb stats`.
 pub struct StatsArgs {
     /// Parsed `ckb.toml`.
     pub config: Box<CKBAppConfig>,

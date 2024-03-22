@@ -16,7 +16,7 @@ pub use app_config::{
 };
 pub use args::{
     DaemonArgs, ExportArgs, ImportArgs, InitArgs, MigrateArgs, MinerArgs, PeerIDArgs, ReplayArgs,
-    ResetDataArgs, RunArgs, StatsArgs,
+    ResetDataArgs, RunArgs, StatsArgs, TruncateBlockArgs,
 };
 pub use configs::*;
 pub use exit_code::ExitCode;
@@ -232,6 +232,24 @@ impl Setup {
             check,
             stop,
             pid_file,
+        })
+    }
+
+    /// Executes `ckb truncate-block`.
+    pub fn truncate_block(self, matches: &ArgMatches) -> Result<TruncateBlockArgs, ExitCode> {
+        let consensus = self.consensus()?;
+        let config = self.config.into_ckb()?;
+
+        let target = matches.get_one::<u64>(cli::ARG_TARGET).cloned();
+
+        if target.is_none() {
+            return Err(ExitCode::Failure);
+        }
+
+        Ok(TruncateBlockArgs {
+            config,
+            consensus,
+            target,
         })
     }
 
