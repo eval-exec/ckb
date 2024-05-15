@@ -690,6 +690,9 @@ impl InflightBlocks {
         download_schedulers.retain(|k, v| {
             // task number zero means this peer's response is very slow
             if v.task_count == 0 {
+                if let Some(metrics) = ckb_metrics::handle() {
+                    metrics.ckb_inflight_timeout_disconnect_count.inc();
+                }
                 disconnect_list.insert(*k);
                 false
             } else {

@@ -122,6 +122,7 @@ pub struct Metrics {
     pub ckb_network_ban_peer: IntCounter,
     pub ckb_inflight_blocks_count: IntGauge,
     pub ckb_inflight_timeout_count: IntCounter,
+    pub ckb_inflight_timeout_disconnect_count: IntCounter,
 }
 
 static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
@@ -304,6 +305,11 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
         ckb_inflight_timeout_count: register_int_counter!(
             "ckb_inflight_timeout_count",
             "The CKB inflight timeout count"
+    )
+            .unwrap(),
+        ckb_inflight_timeout_disconnect_count: register_int_counter!(
+            "ckb_inflight_timeout_disconnect_count",
+            "The CKB inflight timeout disconnect count"
     )
             .unwrap(),
     }
