@@ -1,3 +1,4 @@
+use either::Either;
 use std::path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -82,28 +83,7 @@ where
     }
 
     pub(crate) fn contains_key(&self, hash: &Byte32) -> bool {
-        #[cfg(feature = "stats")]
-        {
-            self.stats().tick_primary_contain();
-        }
-        if self.memory.contains_key(hash) {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_hit_miss_count.hit.inc()
-            }
-            return true;
-        }
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
-        }
-
-        if self.backend.is_empty() {
-            return false;
-        }
-        #[cfg(feature = "stats")]
-        {
-            self.stats().tick_backend_contain();
-        }
-        self.backend.contains_key(hash)
+        self.memory.contains_key(hash)
     }
 
     pub(crate) fn get(&self, hash: &Byte32) -> Option<HeaderIndexView> {
@@ -111,34 +91,29 @@ where
         {
             self.stats().tick_primary_select();
         }
-        if let Some(view) = self.memory.get_refresh(hash) {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_hit_miss_count.hit.inc();
-            }
-            return Some(view);
-        }
 
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics.ckb_header_map_memory_hit_miss_count.miss.inc();
-        }
-
-        if self.backend.is_empty() {
-            return None;
-        }
-        #[cfg(feature = "stats")]
-        {
-            self.stats().tick_backend_delete();
-        }
-        if let Some(view) = self.backend.remove(hash) {
-            #[cfg(feature = "stats")]
-            {
-                self.stats().tick_primary_insert();
+        let view = self.memory.get_refresh(hash)?;
+        match view {
+            Either::Left(view) => return Some(view),
+            Either::Right(_) => {
+                if self.backend.is_empty() {
+                    return None;
+                }
+                #[cfg(feature = "stats")]
+                {
+                    self.stats().tick_backend_delete();
+                }
+                if let Some(view) = self.backend.get(hash) {
+                    #[cfg(feature = "stats")]
+                    {
+                        self.stats().tick_primary_insert();
+                    }
+                    self.memory.insert(view.clone());
+                    return Some(view);
+                }
             }
-            self.memory.insert(view.clone());
-            Some(view)
-        } else {
-            None
         }
+        None
     }
 
     pub(crate) fn insert(&self, view: HeaderIndexView) -> Option<()> {
@@ -158,11 +133,7 @@ where
         }
         // If IBD is not finished, don't shrink memory map
         let allow_shrink_to_fit = self.ibd_finished.load(Ordering::Relaxed);
-        self.memory.remove(hash, allow_shrink_to_fit);
-        if self.backend.is_empty() {
-            return;
-        }
-        self.backend.remove_no_return(hash);
+        self.memory.remove_no_return(hash, allow_shrink_to_fit);
     }
 
     pub(crate) fn limit_memory(&self) {
@@ -178,6 +149,12 @@ where
             let allow_shrink_to_fit = self.ibd_finished.load(Ordering::Relaxed);
             self.memory
                 .remove_batch(values.iter().map(|value| value.hash()), allow_shrink_to_fit);
+        }
+
+        if let Some(metrics) = ckb_metrics::handle() {
+            metrics
+                .ckb_header_map_memory_count
+                .set(self.memory.len() as i64);
         }
     }
 

@@ -1529,6 +1529,7 @@ dependencies = [
  "ckb-util",
  "ckb-verification",
  "dashmap",
+ "either",
  "once_cell",
  "sled",
  "tempfile",

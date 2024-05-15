@@ -5,6 +5,8 @@ use ckb_types::{
     U256,
 };
 use ckb_util::{shrink_to_fit, LinkedHashMap, RwLock};
+use either::Either;
+use std::collections::HashSet;
 use std::default;
 
 const SHRINK_THRESHOLD: usize = 300;
@@ -66,7 +68,13 @@ impl From<HeaderIndexView> for (Byte32, HeaderIndexViewInner) {
     }
 }
 
-pub(crate) struct MemoryMap(RwLock<LinkedHashMap<Byte32, HeaderIndexViewInner>>);
+#[derive(Default)]
+struct MemoryInner {
+    linked_map: LinkedHashMap<Byte32, HeaderIndexViewInner>,
+    left_set: HashSet<Byte32>,
+}
+
+pub(crate) struct MemoryMap(RwLock<MemoryInner>);
 
 impl default::Default for MemoryMap {
     fn default() -> Self {
@@ -75,61 +83,62 @@ impl default::Default for MemoryMap {
 }
 
 impl MemoryMap {
-    #[cfg(feature = "stats")]
     pub(crate) fn len(&self) -> usize {
-        self.0.read().len()
+        self.0.read().linked_map.len()
     }
 
     pub(crate) fn contains_key(&self, key: &Byte32) -> bool {
-        self.0.read().contains_key(key)
+        let inner = self.0.read();
+        inner.linked_map.contains_key(key) || inner.left_set.contains(key)
     }
 
-    pub(crate) fn get_refresh(&self, key: &Byte32) -> Option<HeaderIndexView> {
+    pub(crate) fn get_refresh(&self, key: &Byte32) -> Option<Either<HeaderIndexView, Byte32>> {
         let mut guard = self.0.write();
-        guard
-            .get_refresh(key)
-            .cloned()
-            .map(|inner| (key.clone(), inner).into())
+        if let Some(view) = guard.linked_map.get_refresh(key) {
+            if let Some(metrics) = ckb_metrics::handle() {
+                metrics.ckb_header_map_memory_hit_miss_count.hit.inc()
+            }
+            return Some(Either::<HeaderIndexView, Byte32>::Left(
+                (key.to_owned(), view.to_owned()).into(),
+            ));
+        }
+        if let Some(_) = guard.left_set.get(key) {
+            if let Some(metrics) = ckb_metrics::handle() {
+                metrics.ckb_header_map_memory_hit_miss_count.miss.inc()
+            }
+            return Some(Either::<HeaderIndexView, Byte32>::Right(key.to_owned()));
+        }
+        None
     }
 
     pub(crate) fn insert(&self, header: HeaderIndexView) -> Option<()> {
         let mut guard = self.0.write();
         let (key, value) = header.into();
-        let ret = guard.insert(key, value);
-        if ret.is_none() {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_count.inc();
-            }
-        }
+        let ret = guard.linked_map.insert(key, value);
         ret.map(|_| ())
     }
 
-    pub(crate) fn remove(&self, key: &Byte32, shrink_to_fit: bool) -> Option<HeaderIndexView> {
+    pub(crate) fn remove_no_return(&self, key: &Byte32, shrink_to_fit: bool) {
         let mut guard = self.0.write();
-        let ret = guard.remove(key);
+        guard.linked_map.remove(key);
+        guard.left_set.remove(key);
 
         if shrink_to_fit {
-            shrink_to_fit!(guard, SHRINK_THRESHOLD);
+            shrink_to_fit!(guard.linked_map, SHRINK_THRESHOLD);
         }
-        ret.map(|inner| {
-            if let Some(metrics) = ckb_metrics::handle() {
-                metrics.ckb_header_map_memory_count.dec();
-            }
-
-            (key.clone(), inner).into()
-        })
     }
 
     pub(crate) fn front_n(&self, size_limit: usize) -> Option<Vec<HeaderIndexView>> {
         let guard = self.0.read();
-        let size = guard.len();
+        let size = guard.linked_map.iter().count();
         if size > size_limit {
             let num = size - size_limit;
             Some(
                 guard
+                    .linked_map
                     .iter()
                     .take(num)
-                    .map(|(key, value)| (key.clone(), value.clone()).into())
+                    .map(|(key, value)| (key.to_owned(), value.clone()).into())
                     .collect(),
             )
         } else {
@@ -141,17 +150,15 @@ impl MemoryMap {
         let mut guard = self.0.write();
         let mut keys_count = 0;
         for key in keys {
-            if let Some(_old_value) = guard.remove(&key) {
+            guard.linked_map.remove(&key).and_then(|_| {
                 keys_count += 1;
-            }
-        }
-
-        if let Some(metrics) = ckb_metrics::handle() {
-            metrics.ckb_header_map_memory_count.sub(keys_count)
+                guard.left_set.insert(key);
+                Some(())
+            });
         }
 
         if shrink_to_fit {
-            shrink_to_fit!(guard, SHRINK_THRESHOLD);
+            shrink_to_fit!(guard.linked_map, SHRINK_THRESHOLD);
         }
     }
 }

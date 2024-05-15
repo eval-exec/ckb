@@ -37,6 +37,7 @@ tokio = { version = "1", features = ["sync"] }
 tempfile.workspace = true
 sled = "0.34.7"
 dashmap = "4.0"
+either = "1.11.0"
 
 [dev-dependencies]
 ckb-systemtime = { path = "../util/systemtime", version = "= 0.116.0-pre", features = ["enable_faketime"] }
