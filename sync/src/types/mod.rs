@@ -790,6 +790,13 @@ impl InflightBlocks {
             .remove(&block)
             .map(|state| {
                 let elapsed = unix_time_as_millis().saturating_sub(state.timestamp);
+
+                if let Some(metrics) = ckb_metrics::handle() {
+                    metrics
+                        .ckb_sync_block_received_duration
+                        .observe(elapsed as f64);
+                }
+
                 if let Some(set) = download_schedulers.get_mut(&state.peer) {
                     set.hashes.remove(&block);
                     if adjustment {

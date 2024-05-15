@@ -78,6 +78,8 @@ pub struct Metrics {
     pub ckb_sync_msg_process_duration: HistogramVec,
     /// ckb_sync_block_fetch duraiton (seconds)
     pub ckb_sync_block_fetch_duration: Histogram,
+    /// ckb_sync_block_received duraiton (mili seconds)
+    pub ckb_sync_block_received_duration: Histogram,
     // ckb_header_map_limit_memory duration (seconds)
     pub ckb_header_map_limit_memory_duration: Histogram,
     // ckb_header_map_limit_memory operation duration (seconds)
@@ -181,6 +183,10 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
         ckb_sync_block_fetch_duration: register_histogram!(
             "ckb_sync_block_fetch_duration",
             "The CKB sync block fetch duration (seconds)"
+        ).unwrap(),
+        ckb_sync_block_received_duration: register_histogram!(
+            "ckb_sync_block_received_duration",
+            "The CKB sync block received duration (mili seconds)"
         ).unwrap(),
         ckb_header_map_limit_memory_duration: register_histogram!(
             "ckb_header_map_limit_memory_duration",
