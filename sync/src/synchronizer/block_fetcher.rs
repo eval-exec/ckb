@@ -157,6 +157,11 @@ impl BlockFetcher {
                     .set_last_common_header(self.peer, best_known.number_and_hash());
             }
 
+            self.sync_shared
+                .state()
+                .peers()
+                .set_most_best_known_header(self.peer);
+
             return None;
         }
 

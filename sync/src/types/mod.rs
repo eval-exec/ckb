@@ -380,6 +380,8 @@ pub struct Peers {
     pub state: DashMap<PeerIndex, PeerState>,
     pub n_sync_started: AtomicUsize,
     pub n_protected_outbound_peers: AtomicUsize,
+
+    most_best_known: Mutex<Option<HeaderIndex>>,
 }
 
 #[derive(Debug, Clone)]
@@ -878,14 +880,31 @@ impl Peers {
             .and_then(|peer_state| peer_state.best_known_header.clone())
     }
 
+    pub fn set_most_best_known_header(&self, peer: PeerIndex) {
+        if let Some(most) = self.most_best_known.lock().as_ref() {
+            if let Some(mut peer_state) = self.state.get_mut(&peer) {
+                peer_state.best_known_header = Some(most.to_owned());
+            }
+        }
+    }
+
     pub fn may_set_best_known_header(&self, peer: PeerIndex, header_index: HeaderIndex) {
         if let Some(mut peer_state) = self.state.get_mut(&peer) {
             if let Some(ref known) = peer_state.best_known_header {
                 if header_index.is_better_chain(known) {
-                    peer_state.best_known_header = Some(header_index);
+                    peer_state.best_known_header = Some(header_index.clone());
+                }
+
+                let mut most_best = self.most_best_known.lock();
+                if most_best
+                    .as_ref()
+                    .map(|most_best_known| header_index.is_better_chain(most_best_known))
+                    .unwrap_or(true)
+                {
+                    *most_best = Some(header_index);
                 }
             } else {
-                peer_state.best_known_header = Some(header_index);
+                peer_state.best_known_header = Some(header_index.clone());
             }
         }
     }

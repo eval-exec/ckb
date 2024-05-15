@@ -59,6 +59,7 @@ impl<'a> GetHeadersProcess<'a> {
             if let Some(flag) = shared.state().peers().get_flag(self.peer) {
                 if flag.is_outbound || flag.is_whitelist || flag.is_protect {
                     shared.insert_peer_unknown_header_list(self.peer, block_locator_hashes);
+                    shared.state().peers().set_most_best_known_header(self.peer);
                 }
             };
             return Status::ignored();
