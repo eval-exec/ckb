@@ -745,7 +745,6 @@ dependencies = [
  "ckb-verification-traits",
  "crossbeam",
  "dashmap",
- "either",
  "faux",
  "is_sorted",
  "lazy_static",

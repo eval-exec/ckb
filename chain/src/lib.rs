@@ -31,7 +31,6 @@ use ckb_logger::{error, info};
 use ckb_store::{ChainDB, ChainStore};
 use ckb_types::prelude::{Pack, Unpack};
 use ckb_types::H256;
-use either::Either;
 pub use init::start_chain_services;
 
 type ProcessBlockRequest = Request<LonelyBlock, ()>;
@@ -71,7 +70,7 @@ pub struct LonelyBlock {
 /// LonelyBlock is the block which we have not check weather its parent is stored yet
 pub struct LonelyBlockHash {
     /// block
-    pub block_number_and_hash: Either<BlockNumberAndHash, Arc<BlockView>>,
+    pub block_number_and_hash: BlockNumberAndHash,
 
     pub parent_hash: Byte32,
 
@@ -100,15 +99,9 @@ impl From<LonelyBlock> for LonelyBlockHash {
         let epoch_number: EpochNumber = block.epoch().number();
 
         LonelyBlockHash {
-            block_number_and_hash: if block.data().serialized_size_without_uncle_proposals()
-                <= 12800
-            {
-                Either::Right(block)
-            } else {
-                Either::Left(BlockNumberAndHash {
-                    number: block_number,
-                    hash: block_hash,
-                })
+            block_number_and_hash: BlockNumberAndHash {
+                number: block_number,
+                hash: block_hash,
             },
             parent_hash,
             epoch_number,
@@ -126,10 +119,7 @@ impl LonelyBlockHash {
     }
 
     pub fn number_hash(&self) -> BlockNumberAndHash {
-        match self.block_number_and_hash.as_ref() {
-            Either::Left(block_number_and_hash) => block_number_and_hash.to_owned(),
-            Either::Right(block) => BlockNumberAndHash::new(block.number(), block.hash()),
-        }
+        self.block_number_and_hash.clone()
     }
 
     pub fn epoch_number(&self) -> EpochNumber {
@@ -137,7 +127,7 @@ impl LonelyBlockHash {
     }
 
     pub fn hash(&self) -> Byte32 {
-        self.number_hash().hash()
+        self.block_number_and_hash.hash()
     }
 
     pub fn parent_hash(&self) -> Byte32 {
@@ -145,7 +135,7 @@ impl LonelyBlockHash {
     }
 
     pub fn number(&self) -> BlockNumber {
-        self.number_hash().number()
+        self.block_number_and_hash.number()
     }
 }
 
