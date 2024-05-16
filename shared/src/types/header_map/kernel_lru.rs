@@ -137,6 +137,7 @@ where
     }
 
     pub(crate) fn limit_memory(&self) {
+        return;
         let _trace_timer: Option<HistogramTimer> = ckb_metrics::handle()
             .map(|handle| handle.ckb_header_map_limit_memory_duration.start_timer());
 
