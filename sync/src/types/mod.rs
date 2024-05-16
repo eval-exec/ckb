@@ -1943,16 +1943,6 @@ impl ActiveChain {
         peer: PeerIndex,
         block_number_and_hash: BlockNumberAndHash,
     ) {
-        if block_number_and_hash.number() >= self.tip_number() + 1676214 {
-            info!("peer {} is far behind, ignore getheaders request", peer);
-        } else {
-            info!(
-                "send_getheaders_to_peer peer={}, hash={}",
-                peer,
-                block_number_and_hash.number()
-            );
-        }
-
         if let Some(last_time) = self
             .state()
             .pending_get_headers
