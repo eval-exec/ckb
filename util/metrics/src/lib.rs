@@ -200,11 +200,6 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
             "The CKB header map operation duration (seconds)",
             &["operation"],
         ).unwrap(),
-        ckb_header_map_sled_ops_duration: register_histogram_vec!(
-            "ckb_header_map_sled_ops_duration",
-            "The CKB header map sled operation duration (seconds)",
-            &["operation"],
-        ).unwrap(),
         ckb_header_map_get: register_histogram!(
             "ckb_header_map_get",
             "The CKB header map operation duration (seconds)",
@@ -236,6 +231,11 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
                 12_500_000.0,
                 13_000_000.0,
             ],
+        ).unwrap(),
+        ckb_header_map_sled_ops_duration: register_histogram_vec!(
+            "ckb_header_map_sled_ops_duration",
+            "The CKB header map sled operation duration (seconds)",
+            &["operation"],
         ).unwrap(),
         ckb_header_map_memory_count: register_int_gauge!(
             "ckb_header_map_memory_count",

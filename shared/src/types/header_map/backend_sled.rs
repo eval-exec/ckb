@@ -1,5 +1,6 @@
 use super::KeyValueBackend;
 use crate::types::HeaderIndexView;
+use ckb_metrics::HistogramTimer;
 use ckb_types::{packed::Byte32, prelude::*};
 use sled::{Config, Db, Mode};
 use std::path;
@@ -11,6 +12,17 @@ pub(crate) struct SledBackend {
     count: AtomicUsize,
     db: Db,
     _tmpdir: TempDir,
+}
+
+impl SledBackend {
+    fn _trace_timer(&self, label: &str) -> Option<HistogramTimer> {
+        ckb_metrics::handle().map(|metric| {
+            metric
+                .ckb_header_map_sled_ops_duration
+                .with_label_values(&[label])
+                .start_timer()
+        })
+    }
 }
 
 impl KeyValueBackend for SledBackend {
@@ -48,12 +60,16 @@ impl KeyValueBackend for SledBackend {
     }
 
     fn contains_key(&self, key: &Byte32) -> bool {
+        let _trace_timer = self._trace_timer("contains_key");
+
         self.db
             .contains_key(key.as_slice())
             .expect("sled contains_key")
     }
 
     fn get(&self, key: &Byte32) -> Option<HeaderIndexView> {
+        let _trace_timer = self._trace_timer("get");
+
         self.db
             .get(key.as_slice())
             .unwrap_or_else(|err| panic!("read header map from disk should be ok, but {err}"))
@@ -61,6 +77,8 @@ impl KeyValueBackend for SledBackend {
     }
 
     fn insert(&self, value: &HeaderIndexView) -> Option<()> {
+        let _trace_timer = self._trace_timer("insert");
+
         let key = value.hash();
         let last_value = self
             .db
@@ -73,6 +91,8 @@ impl KeyValueBackend for SledBackend {
     }
 
     fn insert_batch(&self, values: &[HeaderIndexView]) {
+        let _trace_timer = self._trace_timer("insert_batch");
+
         let mut count = 0;
         for value in values {
             let key = value.hash();
@@ -88,6 +108,8 @@ impl KeyValueBackend for SledBackend {
     }
 
     fn remove(&self, key: &Byte32) -> Option<HeaderIndexView> {
+        let _trace_timer = self._trace_timer("remove");
+
         let old_value = self
             .db
             .remove(key.as_slice())
@@ -100,6 +122,8 @@ impl KeyValueBackend for SledBackend {
     }
 
     fn remove_no_return(&self, key: &Byte32) {
+        let _trace_timer = self._trace_timer("remove");
+
         let old_value = self
             .db
             .remove(key.as_slice())
