@@ -249,8 +249,6 @@ impl BlockFetchCMD {
                             *flag = CanStart::Ready;
                             assume_valid_target.take();
                         }
-
-                        *flag = CanStart::Ready
                     }
                 }
             } else {
