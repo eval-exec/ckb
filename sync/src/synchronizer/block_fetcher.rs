@@ -3,7 +3,7 @@ use crate::SyncShared;
 use ckb_constant::sync::{
     BLOCK_DOWNLOAD_WINDOW, CHECK_POINT_WINDOW, INIT_BLOCKS_IN_TRANSIT_PER_PEER,
 };
-use ckb_logger::{debug, info, trace};
+use ckb_logger::{debug, trace};
 use ckb_metrics::HistogramTimer;
 use ckb_network::PeerIndex;
 use ckb_shared::block_status::BlockStatus;
@@ -96,10 +96,10 @@ impl BlockFetcher {
         };
 
         if self.sync_shared.shared().get_unverified_tip().number()
-            >= self.sync_shared.active_chain().tip_number() + BLOCK_DOWNLOAD_WINDOW * 3
+            >= self.sync_shared.active_chain().tip_number() + BLOCK_DOWNLOAD_WINDOW * 9
         {
-            info!(
-                "unverified_tip - tip > BLOCK_DOWNLOAD_WINDOW * 3, skip fetch, unverified_tip: {}, tip: {}",
+            trace!(
+                "unverified_tip - tip > BLOCK_DOWNLOAD_WINDOW * 9, skip fetch, unverified_tip: {}, tip: {}",
                 self.sync_shared.shared().get_unverified_tip().number(),
                 self.sync_shared.active_chain().tip_number()
             );

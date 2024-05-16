@@ -189,8 +189,7 @@ static METRICS: once_cell::sync::Lazy<Metrics> = once_cell::sync::Lazy::new(|| {
         ).unwrap(),
         ckb_sync_block_received_duration: register_histogram!(
             "ckb_sync_block_received_duration",
-            "The CKB sync block received duration (mili seconds)",
-            vec![50.0, 100.0, 200.0, 300.0, 400.0, 500.0, 700.0, 1000.0, 1500.0, 2000.0, 3000.0, 5000.0, 10000.0, 20000.0]
+            "The CKB sync block received duration (mili seconds)"
         ).unwrap(),
         ckb_header_map_limit_memory_duration: register_histogram!(
             "ckb_header_map_limit_memory_duration",
