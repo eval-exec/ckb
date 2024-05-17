@@ -91,7 +91,12 @@ impl HeaderMap {
                 .with_label_values(&["get"])
                 .start_timer()
         });
-        self.inner.get(hash)
+        self.inner.get(hash).map(|view| {
+            if let Some(metrics) = ckb_metrics::handle() {
+                metrics.ckb_header_map_get.observe(view.number() as f64);
+            }
+            view
+        })
     }
 
     pub fn insert(&self, view: HeaderIndexView) -> Option<()> {
