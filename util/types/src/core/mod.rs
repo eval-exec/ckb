@@ -21,6 +21,7 @@ pub mod tx_pool;
 mod tests;
 
 mod advanced_builders;
+mod block_number_and_hash;
 mod blockchain;
 mod extras;
 mod fee_rate;
@@ -39,6 +40,7 @@ pub use views::{
     BlockView, ExtraHashView, HeaderView, TransactionView, UncleBlockVecView, UncleBlockView,
 };
 
+pub use block_number_and_hash::*;
 pub use ckb_gen_types::core::*;
 pub use ckb_occupied_capacity::{
     capacity_bytes, Capacity, Error as CapacityError, Ratio, Result as CapacityResult,
