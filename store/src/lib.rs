@@ -24,3 +24,10 @@ pub use transaction::StoreTransaction;
 pub use write_batch::StoreWriteBatch;
 
 pub use ckb_freezer::Freezer;
+
+fn hex(v: &[u8]) -> String {
+    v.iter()
+        .map(|v| format!("{:02x}", v).to_string())
+        .collect::<Vec<String>>()
+        .join("")
+}

@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use crate::cache::StoreCache;
 use crate::data_loader_wrapper::BorrowedDataLoaderWrapper;
 use ckb_db::{
@@ -15,10 +17,10 @@ use ckb_freezer::Freezer;
 use ckb_types::{
     bytes::Bytes,
     core::{
-        cell::CellMeta, BlockExt, BlockNumber, BlockView, EpochExt, EpochNumber, HeaderView,
-        TransactionInfo, TransactionView, UncleBlockVecView,
+        cell::CellMeta, BlockExt, BlockNumber, BlockNumberAndHash, BlockView, EpochExt,
+        EpochNumber, HeaderView, TransactionInfo, TransactionView, UncleBlockVecView,
     },
-    packed::{self, OutPoint},
+    packed::{self, OutPoint, TransactionKey},
     prelude::*,
 };
 
@@ -49,7 +51,8 @@ pub trait ChainStore: Send + Sync + Sized {
                 return Some(raw_block.into_view());
             }
         }
-        let body = self.get_block_body(h);
+        let body = self
+            .get_block_body_by_num_hash(BlockNumberAndHash::new(header.number(), header.hash()));
         let uncles = self
             .get_block_uncles(h)
             .expect("block uncles must be stored");
@@ -90,7 +93,41 @@ pub trait ChainStore: Send + Sync + Sized {
 
     /// Get block body by block header hash
     fn get_block_body(&self, hash: &packed::Byte32) -> Vec<TransactionView> {
-        let prefix = hash.as_slice();
+        let number = self.get_block_number(hash);
+        if number.is_none() {
+            return Vec::new();
+        }
+        let number = number.expect("must have number");
+
+        // let num_hash = BlockNumberAndHash::new(number, hash.clone());
+        // let num_hash = num_hash.to_db_key();
+        // let prefix: &[u8] = num_hash.as_slice();
+        let key = TransactionKey::new_builder()
+            .block_number(number.pack())
+            .block_hash(hash.clone())
+            .build();
+        let prefix = key.as_slice();
+
+        self.get_iter(
+            COLUMN_BLOCK_BODY,
+            IteratorMode::From(prefix, Direction::Forward),
+        )
+        .take_while(|(key, _)| key.starts_with(prefix))
+        .map(|(_key, value)| {
+            let reader = packed::TransactionViewReader::from_slice_should_be_ok(value.as_ref());
+            Unpack::<TransactionView>::unpack(&reader)
+        })
+        .collect()
+    }
+
+    /// Get block body by number and hash
+    fn get_block_body_by_num_hash(&self, num_hash: BlockNumberAndHash) -> Vec<TransactionView> {
+        let key = TransactionKey::new_builder()
+            .block_number(num_hash.number().pack())
+            .block_hash(num_hash.hash())
+            .build();
+
+        let prefix: &[u8] = key.as_slice();
         self.get_iter(
             COLUMN_BLOCK_BODY,
             IteratorMode::From(prefix, Direction::Forward),
@@ -151,8 +188,13 @@ pub trait ChainStore: Send + Sync + Sized {
                 return hashes.clone();
             }
         };
+        let block_number = self.get_block_number(hash).expect("block number");
 
-        let prefix = hash.as_slice();
+        let key = TransactionKey::new_builder()
+            .block_number(block_number.pack())
+            .block_hash(hash.to_owned())
+            .build();
+        let prefix = key.as_slice()[..40].as_ref();
         let ret: Vec<_> = self
             .get_iter(
                 COLUMN_BLOCK_BODY,
@@ -484,7 +526,9 @@ pub trait ChainStore: Send + Sync + Sized {
 
     /// Gets cellbase by block hash
     fn get_cellbase(&self, hash: &packed::Byte32) -> Option<TransactionView> {
+        let number = self.get_block_number(hash).expect("block number");
         let key = packed::TransactionKey::new_builder()
+            .block_number(number.pack())
             .block_hash(hash.to_owned())
             .build();
         self.get(COLUMN_BLOCK_BODY, key.as_slice()).map(|slice| {
@@ -520,7 +564,14 @@ pub trait ChainStore: Send + Sync + Sized {
                 reader.data().to_entity()
             })?;
 
-        let prefix = hash.as_slice();
+        let number: u64 = header.raw().number().unpack();
+
+        let key = TransactionKey::new_builder()
+            .block_number(number.pack())
+            .block_hash(hash.clone())
+            .build();
+        let prefix = key.as_slice();
+
         let transactions: packed::TransactionVec = self
             .get_iter(
                 COLUMN_BLOCK_BODY,

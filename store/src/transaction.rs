@@ -1,4 +1,5 @@
 use crate::cache::StoreCache;
+use crate::hex;
 use crate::store::ChainStore;
 use ckb_chain_spec::versionbits::VersionbitsIndexer;
 use ckb_db::{
@@ -16,6 +17,7 @@ use ckb_db_schema::{
 use ckb_error::Error;
 use ckb_freezer::Freezer;
 use ckb_merkle_mountain_range::{Error as MMRError, MMRStore, Result as MMRResult};
+use ckb_types::core::BlockNumberAndHash;
 use ckb_types::{
     core::{
         cell::{CellChecker, CellProvider, CellStatus},
@@ -44,12 +46,19 @@ impl ChainStore for StoreTransaction {
     }
 
     fn get(&self, col: Col, key: &[u8]) -> Option<DBPinnableSlice<'_>> {
+        // println!("get col={:?} key={}", col, hex(key));
         self.inner
             .get_pinned(col, key)
             .expect("db operation should be ok")
     }
 
     fn get_iter(&self, col: Col, mode: IteratorMode) -> DBIter {
+        match mode {
+            IteratorMode::From(from, _) => {
+                // println!("get_iter col={:?} mode={:?}", col, hex(from));
+            }
+            _ => {}
+        }
         self.inner
             .iter(col, mode)
             .expect("db operation should be ok")
@@ -117,6 +126,7 @@ impl<'a> ChainStore for StoreTransactionSnapshot<'a> {
     }
 
     fn get(&self, col: Col, key: &[u8]) -> Option<DBPinnableSlice> {
+        // println!("get col={:?} key={}", col, hex(key));
         self.inner
             .get_pinned(col, key)
             .expect("db operation should be ok")
@@ -132,6 +142,12 @@ impl<'a> ChainStore for StoreTransactionSnapshot<'a> {
 impl StoreTransaction {
     /// TODO(doc): @quake
     pub fn insert_raw(&self, col: Col, key: &[u8], value: &[u8]) -> Result<(), Error> {
+        // println!(
+        //     "insert_raw col={:?} key={} value={}",
+        //     col,
+        //     hex(key),
+        //     hex(value)
+        // );
         self.inner.put(col, key, value)
     }
 
@@ -174,6 +190,7 @@ impl StoreTransaction {
     pub fn insert_block(&self, block: &BlockView) -> Result<(), Error> {
         let hash = block.hash();
         let header = block.header().pack();
+        let number = block.number();
         let uncles = block.uncles().pack();
         let proposals = block.data().proposals();
         let txs_len: packed::Uint32 = (block.transactions().len() as u32).pack();
@@ -186,13 +203,10 @@ impl StoreTransaction {
                 extension.as_slice(),
             )?;
         }
+        let num_hash = BlockNumberAndHash::new(number, hash.clone());
         self.insert_raw(
             COLUMN_NUMBER_HASH,
-            packed::NumberHash::new_builder()
-                .number(block.number().pack())
-                .block_hash(hash.clone())
-                .build()
-                .as_slice(),
+            num_hash.to_db_key().as_slice(),
             txs_len.as_slice(),
         )?;
         self.insert_raw(
@@ -202,6 +216,7 @@ impl StoreTransaction {
         )?;
         for (index, tx) in block.transactions().into_iter().enumerate() {
             let key = packed::TransactionKey::new_builder()
+                .block_number(number.pack())
                 .block_hash(hash.clone())
                 .index(index.pack())
                 .build();
@@ -231,6 +246,7 @@ impl StoreTransaction {
         // https://github.com/facebook/rocksdb/issues/4812
         for index in 0..txs_len {
             let key = packed::TransactionKey::new_builder()
+                .block_number(block.number().pack())
                 .block_hash(hash.clone())
                 .index(index.pack())
                 .build();
@@ -257,8 +273,10 @@ impl StoreTransaction {
     pub fn attach_block(&self, block: &BlockView) -> Result<(), Error> {
         let header = block.data().header();
         let block_hash = block.hash();
+        let number = block.number();
         for (index, tx_hash) in block.tx_hashes().iter().enumerate() {
             let key = packed::TransactionKey::new_builder()
+                .block_number(number.pack())
                 .block_hash(block_hash.clone())
                 .index(index.pack())
                 .build();
