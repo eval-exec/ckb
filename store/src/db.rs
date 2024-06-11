@@ -10,7 +10,7 @@ use ckb_db::{
     iter::{DBIter, DBIterator, IteratorMode},
     DBPinnableSlice, RocksDB,
 };
-use ckb_db_schema::{Col, CHAIN_SPEC_HASH_KEY, MIGRATION_VERSION_KEY};
+use ckb_db_schema::{Col, COLUMN_META};
 use ckb_error::{Error, InternalErrorKind};
 use ckb_freezer::Freezer;
 use ckb_types::{
@@ -100,13 +100,13 @@ impl ChainDB {
 
     /// Store the chain spec hash
     pub fn put_chain_spec_hash(&self, hash: &packed::Byte32) -> Result<(), Error> {
-        self.db.put_default(CHAIN_SPEC_HASH_KEY, hash.as_slice())
+        self.db.put_default(COLUMN_META::CHAIN_SPEC_HASH_KEY, hash.as_slice())
     }
 
     /// Return the chain spec hash
     pub fn get_chain_spec_hash(&self) -> Option<packed::Byte32> {
         self.db
-            .get_pinned_default(CHAIN_SPEC_HASH_KEY)
+            .get_pinned_default(COLUMN_META::CHAIN_SPEC_HASH_KEY)
             .expect("db operation should be ok")
             .map(|raw| packed::Byte32Reader::from_slice_should_be_ok(raw.as_ref()).to_entity())
     }
@@ -114,7 +114,7 @@ impl ChainDB {
     /// Return the chain spec hash
     pub fn get_migration_version(&self) -> Option<DBPinnableSlice> {
         self.db
-            .get_pinned_default(MIGRATION_VERSION_KEY)
+            .get_pinned_default(COLUMN_META::MIGRATION_VERSION_KEY)
             .expect("db operation should be ok")
     }
 

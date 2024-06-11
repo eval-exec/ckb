@@ -12,6 +12,7 @@ use ckb_types::{
 };
 use std::cmp;
 use std::collections::HashSet;
+use std::fmt::format;
 
 #[cfg(test)]
 mod tests;
@@ -88,7 +89,7 @@ impl<'a, CS: ChainStore> RewardCalculator<'a, CS> {
             &self
                 .store
                 .get_cellbase(&target.hash())
-                .expect("target cellbase exist")
+                .expect(&format!("target cellbase {} exist", target.hash()))
                 .witnesses()
                 .get(0)
                 .expect("target witness exist")

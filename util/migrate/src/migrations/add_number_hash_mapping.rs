@@ -1,7 +1,9 @@
 use ckb_app_config::StoreConfig;
 use ckb_db::{Direction, IteratorMode, Result, RocksDB};
 use ckb_db_migration::{Migration, ProgressBar, ProgressStyle};
-use ckb_db_schema::{COLUMN_BLOCK_BODY, COLUMN_INDEX, COLUMN_NUMBER_HASH};
+use ckb_db_schema::{
+    COLUMN_BLOCK_BODY, COLUMN_INDEX, COLUMN_NUMBER_HASH,
+};
 use ckb_migration_template::multi_thread_migration;
 use ckb_store::{ChainDB, ChainStore};
 use ckb_types::{molecule::io::Write, packed, prelude::*};
@@ -21,9 +23,9 @@ impl Migration for AddNumberHashMapping {
             {
                 for number in i * chunk_size..end {
                     let block_number: packed::Uint64 = number.pack();
-                    let raw_hash = chain_db.get(COLUMN_INDEX, block_number.as_slice()).expect("DB data integrity");
+                    let raw_hash = chain_db.get(COLUMN_INDEX::NAME, block_number.as_slice()).expect("DB data integrity");
                     let txs_len = chain_db.get_iter(
-                        COLUMN_BLOCK_BODY,
+                        COLUMN_BLOCK_BODY::NAME,
                         IteratorMode::From(&raw_hash, Direction::Forward),
                     )
                     .take_while(|(key, _)| key.starts_with(&raw_hash))
@@ -37,7 +39,7 @@ impl Migration for AddNumberHashMapping {
                     let key = packed::NumberHash::new_unchecked(raw_key.into());
 
                     wb.put(
-                        COLUMN_NUMBER_HASH,
+                        COLUMN_NUMBER_HASH::NAME,
                         key.as_slice(),
                         raw_txs_len.as_slice(),
                     )

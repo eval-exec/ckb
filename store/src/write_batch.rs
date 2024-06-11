@@ -1,7 +1,8 @@
 use ckb_db::RocksDBWriteBatch;
 use ckb_db_schema::{
-    Col, COLUMN_BLOCK_BODY, COLUMN_BLOCK_EXTENSION, COLUMN_BLOCK_HEADER, COLUMN_BLOCK_PROPOSAL_IDS,
-    COLUMN_BLOCK_UNCLE, COLUMN_CELL, COLUMN_CELL_DATA, COLUMN_CELL_DATA_HASH, COLUMN_NUMBER_HASH,
+    Col, COLUMN_BLOCK_BODY,
+    COLUMN_BLOCK_EXTENSION, COLUMN_BLOCK_HEADER, COLUMN_BLOCK_PROPOSAL_IDS, COLUMN_BLOCK_UNCLE,
+    COLUMN_CELL, COLUMN_CELL_DATA, COLUMN_CELL_DATA_HASH, COLUMN_NUMBER_HASH,
 };
 use ckb_error::Error;
 use ckb_types::{core::BlockNumber, packed, prelude::*};
@@ -55,17 +56,17 @@ impl StoreWriteBatch {
     ) -> Result<(), Error> {
         for (out_point, cell, cell_data) in cells {
             let key = out_point.to_cell_key();
-            self.put(COLUMN_CELL, &key, cell.as_slice())?;
+            self.put(COLUMN_CELL::NAME, &key, cell.as_slice())?;
             if let Some(data) = cell_data {
-                self.put(COLUMN_CELL_DATA, &key, data.as_slice())?;
+                self.put(COLUMN_CELL_DATA::NAME, &key, data.as_slice())?;
                 self.put(
-                    COLUMN_CELL_DATA_HASH,
+                    COLUMN_CELL_DATA_HASH::NAME,
                     &key,
                     data.output_data_hash().as_slice(),
                 )?;
             } else {
-                self.put(COLUMN_CELL_DATA, &key, &[])?;
-                self.put(COLUMN_CELL_DATA_HASH, &key, &[])?;
+                self.put(COLUMN_CELL_DATA::NAME, &key, &[])?;
+                self.put(COLUMN_CELL_DATA_HASH::NAME, &key, &[])?;
             }
         }
         Ok(())
@@ -78,9 +79,9 @@ impl StoreWriteBatch {
     ) -> Result<(), Error> {
         for out_point in out_points {
             let key = out_point.to_cell_key();
-            self.delete(COLUMN_CELL, &key)?;
-            self.delete(COLUMN_CELL_DATA, &key)?;
-            self.delete(COLUMN_CELL_DATA_HASH, &key)?;
+            self.delete(COLUMN_CELL::NAME, &key)?;
+            self.delete(COLUMN_CELL_DATA::NAME, &key)?;
+            self.delete(COLUMN_CELL_DATA_HASH::NAME, &key)?;
         }
 
         Ok(())
@@ -93,12 +94,12 @@ impl StoreWriteBatch {
         hash: &packed::Byte32,
         txs_len: u32,
     ) -> Result<(), Error> {
-        self.inner.delete(COLUMN_BLOCK_UNCLE, hash.as_slice())?;
-        self.inner.delete(COLUMN_BLOCK_EXTENSION, hash.as_slice())?;
+        self.inner.delete(COLUMN_BLOCK_UNCLE::NAME, hash.as_slice())?;
+        self.inner.delete(COLUMN_BLOCK_EXTENSION::NAME, hash.as_slice())?;
         self.inner
-            .delete(COLUMN_BLOCK_PROPOSAL_IDS, hash.as_slice())?;
+            .delete(COLUMN_BLOCK_PROPOSAL_IDS::NAME, hash.as_slice())?;
         self.inner.delete(
-            COLUMN_NUMBER_HASH,
+            COLUMN_NUMBER_HASH::NAME,
             packed::NumberHash::new_builder()
                 .number(number.pack())
                 .block_hash(hash.clone())
@@ -106,14 +107,11 @@ impl StoreWriteBatch {
                 .as_slice(),
         )?;
 
-        let key_range = (0u32..txs_len).map(|i| {
-            packed::TransactionKey::new_builder()
-                .block_hash(hash.clone())
-                .index(i.pack())
-                .build()
-        });
+        let key_range = (0u32..txs_len).map(|i| COLUMN_BLOCK_BODY::key(
+            number, hash.to_owned(),
+            i as usize));
 
-        self.inner.delete_range(COLUMN_BLOCK_BODY, key_range)?;
+        self.inner.delete_range(COLUMN_BLOCK_BODY::NAME, key_range)?;
         Ok(())
     }
 
@@ -124,7 +122,7 @@ impl StoreWriteBatch {
         hash: &packed::Byte32,
         txs_len: u32,
     ) -> Result<(), Error> {
-        self.inner.delete(COLUMN_BLOCK_HEADER, hash.as_slice())?;
+        self.inner.delete(COLUMN_BLOCK_HEADER::NAME, hash.as_slice())?;
         self.delete_block_body(number, hash, txs_len)
     }
 }

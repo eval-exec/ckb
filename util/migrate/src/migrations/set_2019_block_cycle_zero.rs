@@ -49,7 +49,7 @@ impl Migration for BlockExt2019ToZero {
         let header = if tip_epoch_number < hard_fork_epoch_number {
             Some(tip_header)
         } else if let Some(epoch_hash) =
-            chain_db.get(COLUMN_EPOCH, hard_fork_epoch_number.as_slice())
+            chain_db.get(COLUMN_EPOCH::NAME, hard_fork_epoch_number.as_slice())
         {
             let epoch_ext = chain_db
                 .get_epoch_ext(

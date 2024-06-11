@@ -76,8 +76,8 @@ impl Migration for CellMigration {
 
 // https://github.com/facebook/rocksdb/issues/1295
 fn clean_cell_column(db: &mut RocksDB) -> Result<(), Error> {
-    db.drop_cf(COLUMN_CELL)?;
-    db.create_cf(COLUMN_CELL)?;
+    db.drop_cf(COLUMN_CELL::NAME)?;
+    db.create_cf(COLUMN_CELL::NAME)?;
     Ok(())
 }
 

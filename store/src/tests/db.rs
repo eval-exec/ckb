@@ -109,7 +109,7 @@ fn freeze_blockv0() {
 
     let txn = store.begin_transaction();
     txn.insert_raw(
-        COLUMN_BLOCK_HEADER,
+        COLUMN_BLOCK_HEADER::NAME,
         block_hash.as_slice(),
         header.pack().as_slice(),
     )
@@ -145,7 +145,7 @@ fn freeze_blockv1_with_extension() {
 
     let txn = store.begin_transaction();
     txn.insert_raw(
-        COLUMN_BLOCK_HEADER,
+        COLUMN_BLOCK_HEADER::NAME,
         block_hash.as_slice(),
         header.pack().as_slice(),
     )
