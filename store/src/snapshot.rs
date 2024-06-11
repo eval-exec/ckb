@@ -1,5 +1,4 @@
 use crate::cache::StoreCache;
-use crate::hex;
 use crate::store::ChainStore;
 use ckb_db::{
     iter::{DBIter, DBIterator, IteratorMode},
@@ -33,12 +32,6 @@ impl ChainStore for StoreSnapshot {
     }
 
     fn get_iter(&self, col: Col, mode: IteratorMode) -> DBIter {
-        match mode {
-            IteratorMode::From(from, _) => {
-                // println!("get_iter col={:?} mode={:?}", col, hex(from));
-            }
-            _ => {}
-        }
         self.inner
             .iter(col, mode)
             .expect("db operation should be ok")

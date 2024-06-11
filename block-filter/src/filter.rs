@@ -4,7 +4,7 @@ use ckb_shared::Shared;
 use ckb_stop_handler::{new_tokio_exit_rx, CancellationToken};
 use ckb_store::{ChainDB, ChainStore};
 use ckb_types::{
-    core::{BlockNumberAndHash, HeaderView},
+    core::HeaderView,
     packed::{Byte32, CellOutput, OutPoint},
     prelude::*,
     utilities::{build_filter_data, FilterDataProvider},
@@ -138,8 +138,7 @@ impl BlockFilter {
                 .expect("parent block filter data stored")
         };
 
-        let transactions =
-            db.get_block_body_by_num_hash(BlockNumberAndHash::new(header.number(), header.hash()));
+        let transactions = db.get_block_body_by_num_hash(header.number(), header.hash());
         let transactions_size: usize = transactions.iter().map(|tx| tx.data().total_size()).sum();
         let provider = WrappedChainDB::new(db);
         let (filter_data, missing_out_points) = build_filter_data(provider, &transactions);
