@@ -138,7 +138,7 @@ impl BlockFilter {
                 .expect("parent block filter data stored")
         };
 
-        let transactions = db.get_block_body(&header.hash());
+        let transactions = db.get_block_body_by_num_hash(header.number(), header.hash());
         let transactions_size: usize = transactions.iter().map(|tx| tx.data().total_size()).sum();
         let provider = WrappedChainDB::new(db);
         let (filter_data, missing_out_points) = build_filter_data(provider, &transactions);

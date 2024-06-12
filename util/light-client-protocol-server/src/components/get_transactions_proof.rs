@@ -117,7 +117,7 @@ impl<'a> GetTransactionsProofProcess<'a> {
             filtered_blocks.push(filtered_block);
             if ckb2023 {
                 let uncles = snapshot
-                    .get_block_uncles(&block_hash)
+                    .get_block_uncles(block.number(), &block_hash)
                     .expect("block uncles must be stored");
                 let extension = snapshot.get_block_extension(&block_hash);
 
