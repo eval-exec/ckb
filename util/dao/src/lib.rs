@@ -36,10 +36,10 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
 
     /// Returns the primary block reward for `target` block.
     pub fn primary_block_reward(&self, target: &HeaderView) -> Result<Capacity, DaoError> {
-        let target_epoch = self
-            .data_loader
-            .get_epoch_ext(target)
-            .ok_or(DaoError::InvalidHeader)?;
+        let target_epoch = self.data_loader.get_epoch_ext(target).ok_or({
+            error!("target {} epoch ext not found", target.hash());
+            DaoError::InvalidHeader
+        })?;
 
         target_epoch
             .block_reward(target.number())
@@ -53,14 +53,17 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
         }
 
         let target_parent_hash = target.data().raw().parent_hash();
-        let target_parent = self
-            .data_loader
-            .get_header(&target_parent_hash)
-            .ok_or(DaoError::InvalidHeader)?;
-        let target_epoch = self
-            .data_loader
-            .get_epoch_ext(target)
-            .ok_or(DaoError::InvalidHeader)?;
+        let target_parent = self.data_loader.get_header(&target_parent_hash).ok_or({
+            error!(
+                "target parent hash {} get header not found",
+                target_parent_hash
+            );
+            DaoError::InvalidHeader
+        })?;
+        let target_epoch = self.data_loader.get_epoch_ext(target).ok_or({
+            error!("get epoch ext {} not found", target);
+            DaoError::InvalidHeader
+        })?;
 
         let target_g2 = target_epoch
             .secondary_block_issuance(target.number(), self.consensus.secondary_epoch_reward())?;
@@ -141,7 +144,10 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
         let current_block_epoch = self
             .consensus
             .next_epoch_ext(parent, self.data_loader)
-            .ok_or(DaoError::InvalidHeader)?
+            .ok_or({
+                error!("next epoch ext parent {} not found", parent.hash());
+                DaoError::InvalidHeader
+            })?
             .epoch();
         self.dao_field_with_current_epoch(rtxs, parent, &current_block_epoch)
     }
@@ -294,14 +300,21 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
         deposit_header_hash: &Byte32,
         withdrawing_header_hash: &Byte32,
     ) -> Result<Capacity, DaoError> {
-        let deposit_header = self
-            .data_loader
-            .get_header(deposit_header_hash)
-            .ok_or(DaoError::InvalidHeader)?;
+        let deposit_header = self.data_loader.get_header(deposit_header_hash).ok_or({
+            erorr!(
+                "deposit header  hash get header not found{}",
+                deposit_header_hash
+            );
+            DaoError::InvalidHeader
+        })?;
         let withdrawing_header = self
             .data_loader
             .get_header(withdrawing_header_hash)
-            .ok_or(DaoError::InvalidHeader)?;
+            .ok_or({
+                error!("withdrawing header hash get header not found{}", withdrawing_header_hash");
+                DaoError::InvalidHeader
+            }
+            )?;
         if deposit_header.number() >= withdrawing_header.number() {
             return Err(DaoError::InvalidOutPoint);
         }
