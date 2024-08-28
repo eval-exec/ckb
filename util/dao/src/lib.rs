@@ -14,6 +14,7 @@ use ckb_types::{
     prelude::*,
 };
 use std::collections::HashSet;
+use ckb_logger::error;
 
 #[cfg(test)]
 mod tests;
@@ -301,7 +302,7 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
         withdrawing_header_hash: &Byte32,
     ) -> Result<Capacity, DaoError> {
         let deposit_header = self.data_loader.get_header(deposit_header_hash).ok_or({
-            erorr!(
+            error!(
                 "deposit header  hash get header not found{}",
                 deposit_header_hash
             );
@@ -311,7 +312,7 @@ impl<'a, DL: CellDataProvider + EpochProvider + HeaderProvider> DaoCalculator<'a
             .data_loader
             .get_header(withdrawing_header_hash)
             .ok_or({
-                error!("withdrawing header hash get header not found{}", withdrawing_header_hash");
+                error!("withdrawing header hash get header not found{}", withdrawing_header_hash);
                 DaoError::InvalidHeader
             }
             )?;
