@@ -245,11 +245,11 @@ impl SharedBuilder {
         for bn in proposal_start..=tip_number {
             if let Some(hash) = store.get_block_hash(bn) {
                 let mut ids_set = HashSet::new();
-                if let Some(ids) = store.get_block_proposal_txs_ids(&hash) {
+                if let Some(ids) = store.get_block_proposal_txs_ids(bn, &hash) {
                     ids_set.extend(ids)
                 }
 
-                if let Some(us) = store.get_block_uncles(&hash) {
+                if let Some(us) = store.get_block_uncles(bn, &hash) {
                     for u in us.data().into_iter() {
                         ids_set.extend(u.proposals().into_iter());
                     }

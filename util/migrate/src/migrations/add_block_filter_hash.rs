@@ -70,7 +70,7 @@ impl Migration for AddBlockFilterHash {
                     );
                     db_txn
                         .put(
-                            COLUMN_BLOCK_FILTER_HASH,
+                            COLUMN_BLOCK_FILTER_HASH::NAME,
                             block_hash.as_slice(),
                             parent_block_filter_hash.as_slice(),
                         )

@@ -7,15 +7,16 @@ use ckb_db::{
 };
 use ckb_db_schema::{
     Col, COLUMN_BLOCK_BODY, COLUMN_BLOCK_EPOCH, COLUMN_BLOCK_EXT, COLUMN_BLOCK_EXTENSION,
-    COLUMN_BLOCK_FILTER, COLUMN_BLOCK_FILTER_HASH, COLUMN_BLOCK_HEADER, COLUMN_BLOCK_PROPOSAL_IDS,
-    COLUMN_BLOCK_UNCLE, COLUMN_CELL, COLUMN_CELL_DATA, COLUMN_CELL_DATA_HASH,
-    COLUMN_CHAIN_ROOT_MMR, COLUMN_EPOCH, COLUMN_INDEX, COLUMN_META, COLUMN_NUMBER_HASH,
-    COLUMN_TRANSACTION_INFO, COLUMN_UNCLES, META_CURRENT_EPOCH_KEY,
-    META_LATEST_BUILT_FILTER_DATA_KEY, META_TIP_HEADER_KEY,
+    COLUMN_BLOCK_FILTER, COLUMN_BLOCK_FILTER_HASH, COLUMN_BLOCK_HEADER, COLUMN_BLOCK_HEADER_NUM,
+    COLUMN_BLOCK_PROPOSAL_IDS, COLUMN_BLOCK_UNCLE, COLUMN_CELL, COLUMN_CELL_DATA,
+    COLUMN_CELL_DATA_HASH, COLUMN_CHAIN_ROOT_MMR, COLUMN_EPOCH, COLUMN_INDEX, COLUMN_META,
+    COLUMN_NUMBER_HASH, COLUMN_TRANSACTION_INFO, COLUMN_UNCLES,
 };
 use ckb_error::Error;
 use ckb_freezer::Freezer;
 use ckb_merkle_mountain_range::{Error as MMRError, MMRStore, Result as MMRResult};
+use ckb_types::core::BlockNumber;
+use ckb_types::packed::Uint256;
 use ckb_types::{
     core::{
         cell::{CellChecker, CellProvider, CellStatus},
@@ -44,6 +45,7 @@ impl ChainStore for StoreTransaction {
     }
 
     fn get(&self, col: Col, key: &[u8]) -> Option<DBPinnableSlice<'_>> {
+        // println!("get col={:?} key={}", col, hex(key));
         self.inner
             .get_pinned(col, key)
             .expect("db operation should be ok")
@@ -117,6 +119,7 @@ impl<'a> ChainStore for StoreTransactionSnapshot<'a> {
     }
 
     fn get(&self, col: Col, key: &[u8]) -> Option<DBPinnableSlice> {
+        // println!("get col={:?} key={}", col, hex(key));
         self.inner
             .get_pinned(col, key)
             .expect("db operation should be ok")
@@ -132,6 +135,12 @@ impl<'a> ChainStore for StoreTransactionSnapshot<'a> {
 impl StoreTransaction {
     /// TODO(doc): @quake
     pub fn insert_raw(&self, col: Col, key: &[u8], value: &[u8]) -> Result<(), Error> {
+        // println!(
+        //     "insert_raw col={:?} key={} value={}",
+        //     col,
+        //     hex(key),
+        //     hex(value)
+        // );
         self.inner.put(col, key, value)
     }
 
@@ -160,53 +169,70 @@ impl StoreTransaction {
         snapshot: &StoreTransactionSnapshot<'_>,
     ) -> Option<packed::Byte32> {
         self.inner
-            .get_for_update(COLUMN_META, META_TIP_HEADER_KEY, &snapshot.inner)
+            .get_for_update(
+                COLUMN_META::NAME,
+                COLUMN_META::META_TIP_HEADER_KEY,
+                &snapshot.inner,
+            )
             .expect("db operation should be ok")
             .map(|slice| packed::Byte32Reader::from_slice_should_be_ok(slice.as_ref()).to_entity())
     }
 
     /// TODO(doc): @quake
     pub fn insert_tip_header(&self, h: &HeaderView) -> Result<(), Error> {
-        self.insert_raw(COLUMN_META, META_TIP_HEADER_KEY, h.hash().as_slice())
+        self.insert_raw(
+            COLUMN_META::NAME,
+            COLUMN_META::META_TIP_HEADER_KEY,
+            h.hash().as_slice(),
+        )
     }
 
     /// TODO(doc): @quake
     pub fn insert_block(&self, block: &BlockView) -> Result<(), Error> {
         let hash = block.hash();
         let header = block.header().pack();
+        let number = block.number();
         let uncles = block.uncles().pack();
         let proposals = block.data().proposals();
         let txs_len: packed::Uint32 = (block.transactions().len() as u32).pack();
-        self.insert_raw(COLUMN_BLOCK_HEADER, hash.as_slice(), header.as_slice())?;
-        self.insert_raw(COLUMN_BLOCK_UNCLE, hash.as_slice(), uncles.as_slice())?;
+        let block_number: packed::Uint64 = number.pack();
+        self.insert_raw(
+            COLUMN_BLOCK_HEADER_NUM::NAME,
+            hash.as_slice(),
+            block_number.as_slice(),
+        )?;
+        self.insert_raw(
+            COLUMN_BLOCK_HEADER::NAME,
+            COLUMN_BLOCK_HEADER::key(number, hash.clone()).as_slice(),
+            header.as_slice(),
+        )?;
+
+        self.insert_raw(
+            COLUMN_BLOCK_UNCLE::NAME,
+            COLUMN_BLOCK_UNCLE::key(number, hash.to_owned()).as_ref(),
+            uncles.as_slice(),
+        )?;
         if let Some(extension) = block.extension() {
             self.insert_raw(
-                COLUMN_BLOCK_EXTENSION,
+                COLUMN_BLOCK_EXTENSION::NAME,
                 hash.as_slice(),
                 extension.as_slice(),
             )?;
         }
         self.insert_raw(
-            COLUMN_NUMBER_HASH,
-            packed::NumberHash::new_builder()
-                .number(block.number().pack())
-                .block_hash(hash.clone())
-                .build()
-                .as_slice(),
+            COLUMN_NUMBER_HASH::NAME,
+            COLUMN_NUMBER_HASH::key(number, hash.clone()).as_ref(),
             txs_len.as_slice(),
         )?;
         self.insert_raw(
-            COLUMN_BLOCK_PROPOSAL_IDS,
-            hash.as_slice(),
+            COLUMN_BLOCK_PROPOSAL_IDS::NAME,
+            COLUMN_BLOCK_PROPOSAL_IDS::key(number, hash.to_owned()).as_ref(),
             proposals.as_slice(),
         )?;
         for (index, tx) in block.transactions().into_iter().enumerate() {
-            let key = packed::TransactionKey::new_builder()
-                .block_hash(hash.clone())
-                .index(index.pack())
-                .build();
+            let key = COLUMN_BLOCK_BODY::key(number, hash.to_owned(), index);
             let tx_data = tx.pack();
-            self.insert_raw(COLUMN_BLOCK_BODY, key.as_slice(), tx_data.as_slice())?;
+            self.insert_raw(COLUMN_BLOCK_BODY::NAME, key.as_ref(), tx_data.as_slice())?;
         }
         Ok(())
     }
@@ -214,13 +240,23 @@ impl StoreTransaction {
     /// TODO(doc): @quake
     pub fn delete_block(&self, block: &BlockView) -> Result<(), Error> {
         let hash = block.hash();
+        let number = block.number();
         let txs_len = block.transactions().len();
-        self.delete(COLUMN_BLOCK_HEADER, hash.as_slice())?;
-        self.delete(COLUMN_BLOCK_UNCLE, hash.as_slice())?;
-        self.delete(COLUMN_BLOCK_EXTENSION, hash.as_slice())?;
-        self.delete(COLUMN_BLOCK_PROPOSAL_IDS, hash.as_slice())?;
         self.delete(
-            COLUMN_NUMBER_HASH,
+            COLUMN_BLOCK_HEADER::NAME,
+            COLUMN_BLOCK_HEADER::key(number, hash.clone()).as_slice(),
+        )?;
+        self.delete(
+            COLUMN_BLOCK_UNCLE::NAME,
+            COLUMN_BLOCK_UNCLE::key(number, hash.clone()).as_ref(),
+        )?;
+        self.delete(COLUMN_BLOCK_EXTENSION::NAME, hash.as_slice())?;
+        self.delete(
+            COLUMN_BLOCK_PROPOSAL_IDS::NAME,
+            COLUMN_BLOCK_PROPOSAL_IDS::key(number, hash.to_owned()).as_ref(),
+        )?;
+        self.delete(
+            COLUMN_NUMBER_HASH::NAME,
             packed::NumberHash::new_builder()
                 .number(block.number().pack())
                 .block_hash(hash.clone())
@@ -230,11 +266,8 @@ impl StoreTransaction {
         // currently rocksdb transaction do not support `DeleteRange`
         // https://github.com/facebook/rocksdb/issues/4812
         for index in 0..txs_len {
-            let key = packed::TransactionKey::new_builder()
-                .block_hash(hash.clone())
-                .index(index.pack())
-                .build();
-            self.delete(COLUMN_BLOCK_BODY, key.as_slice())?;
+            let key = COLUMN_BLOCK_BODY::key(block.number(), hash.to_owned(), index);
+            self.delete(COLUMN_BLOCK_BODY::NAME, key.as_ref())?;
         }
         Ok(())
     }
@@ -242,13 +275,14 @@ impl StoreTransaction {
     /// TODO(doc): @quake
     pub fn insert_block_ext(
         &self,
+        block_number: BlockNumber,
         block_hash: &packed::Byte32,
         ext: &BlockExt,
     ) -> Result<(), Error> {
         let packed_ext: packed::BlockExtV1 = ext.pack();
         self.insert_raw(
-            COLUMN_BLOCK_EXT,
-            block_hash.as_slice(),
+            COLUMN_BLOCK_EXT::NAME,
+            COLUMN_BLOCK_EXT::key(block_number, block_hash.to_owned()).as_ref(),
             packed_ext.as_slice(),
         )
     }
@@ -257,8 +291,10 @@ impl StoreTransaction {
     pub fn attach_block(&self, block: &BlockView) -> Result<(), Error> {
         let header = block.data().header();
         let block_hash = block.hash();
+        let number = block.number();
         for (index, tx_hash) in block.tx_hashes().iter().enumerate() {
             let key = packed::TransactionKey::new_builder()
+                .block_number(number.pack())
                 .block_hash(block_hash.clone())
                 .index(index.pack())
                 .build();
@@ -267,31 +303,43 @@ impl StoreTransaction {
                 .block_number(header.raw().number())
                 .block_epoch(header.raw().epoch())
                 .build();
-            self.insert_raw(COLUMN_TRANSACTION_INFO, tx_hash.as_slice(), info.as_slice())?;
+            self.insert_raw(
+                COLUMN_TRANSACTION_INFO::NAME,
+                tx_hash.as_slice(),
+                info.as_slice(),
+            )?;
         }
         let block_number: packed::Uint64 = block.number().pack();
-        self.insert_raw(COLUMN_INDEX, block_number.as_slice(), block_hash.as_slice())?;
+        self.insert_raw(
+            COLUMN_INDEX::NAME,
+            block_number.as_slice(),
+            block_hash.as_slice(),
+        )?;
         for uncle in block.uncles().into_iter() {
             self.insert_raw(
-                COLUMN_UNCLES,
+                COLUMN_UNCLES::NAME,
                 uncle.hash().as_slice(),
                 uncle.header().pack().as_slice(),
             )?;
         }
-        self.insert_raw(COLUMN_INDEX, block_hash.as_slice(), block_number.as_slice())
+        self.insert_raw(
+            COLUMN_INDEX::NAME,
+            block_hash.as_slice(),
+            block_number.as_slice(),
+        )
     }
 
     /// TODO(doc): @quake
     pub fn detach_block(&self, block: &BlockView) -> Result<(), Error> {
         for tx_hash in block.tx_hashes().iter() {
-            self.delete(COLUMN_TRANSACTION_INFO, tx_hash.as_slice())?;
+            self.delete(COLUMN_TRANSACTION_INFO::NAME, tx_hash.as_slice())?;
         }
         for uncle in block.uncles().into_iter() {
-            self.delete(COLUMN_UNCLES, uncle.hash().as_slice())?;
+            self.delete(COLUMN_UNCLES::NAME, uncle.hash().as_slice())?;
         }
         let block_number = block.data().header().raw().number();
-        self.delete(COLUMN_INDEX, block_number.as_slice())?;
-        self.delete(COLUMN_INDEX, block.hash().as_slice())
+        self.delete(COLUMN_INDEX::NAME, block_number.as_slice())?;
+        self.delete(COLUMN_INDEX::NAME, block.hash().as_slice())
     }
 
     /// TODO(doc): @quake
@@ -301,7 +349,7 @@ impl StoreTransaction {
         epoch_hash: &packed::Byte32,
     ) -> Result<(), Error> {
         self.insert_raw(
-            COLUMN_BLOCK_EPOCH,
+            COLUMN_BLOCK_EPOCH::NAME,
             block_hash.as_slice(),
             epoch_hash.as_slice(),
         )
@@ -309,14 +357,18 @@ impl StoreTransaction {
 
     /// TODO(doc): @quake
     pub fn insert_epoch_ext(&self, hash: &packed::Byte32, epoch: &EpochExt) -> Result<(), Error> {
-        self.insert_raw(COLUMN_EPOCH, hash.as_slice(), epoch.pack().as_slice())?;
+        self.insert_raw(COLUMN_EPOCH::NAME, hash.as_slice(), epoch.pack().as_slice())?;
         let epoch_number: packed::Uint64 = epoch.number().pack();
-        self.insert_raw(COLUMN_EPOCH, epoch_number.as_slice(), hash.as_slice())
+        self.insert_raw(COLUMN_EPOCH::NAME, epoch_number.as_slice(), hash.as_slice())
     }
 
     /// TODO(doc): @quake
     pub fn insert_current_epoch_ext(&self, epoch: &EpochExt) -> Result<(), Error> {
-        self.insert_raw(COLUMN_META, META_CURRENT_EPOCH_KEY, epoch.pack().as_slice())
+        self.insert_raw(
+            COLUMN_META::NAME,
+            COLUMN_META::META_CURRENT_EPOCH_KEY,
+            epoch.pack().as_slice(),
+        )
     }
 
     /// TODO(doc): @quake
@@ -332,17 +384,17 @@ impl StoreTransaction {
     ) -> Result<(), Error> {
         for (out_point, cell, cell_data) in cells {
             let key = out_point.to_cell_key();
-            self.insert_raw(COLUMN_CELL, &key, cell.as_slice())?;
+            self.insert_raw(COLUMN_CELL::NAME, &key, cell.as_slice())?;
             if let Some(data) = cell_data {
-                self.insert_raw(COLUMN_CELL_DATA, &key, data.as_slice())?;
+                self.insert_raw(COLUMN_CELL_DATA::NAME, &key, data.as_slice())?;
                 self.insert_raw(
-                    COLUMN_CELL_DATA_HASH,
+                    COLUMN_CELL_DATA_HASH::NAME,
                     &key,
                     data.output_data_hash().as_slice(),
                 )?;
             } else {
-                self.insert_raw(COLUMN_CELL_DATA, &key, &[])?;
-                self.insert_raw(COLUMN_CELL_DATA_HASH, &key, &[])?;
+                self.insert_raw(COLUMN_CELL_DATA::NAME, &key, &[])?;
+                self.insert_raw(COLUMN_CELL_DATA_HASH::NAME, &key, &[])?;
             }
         }
         Ok(())
@@ -355,9 +407,9 @@ impl StoreTransaction {
     ) -> Result<(), Error> {
         for out_point in out_points {
             let key = out_point.to_cell_key();
-            self.delete(COLUMN_CELL, &key)?;
-            self.delete(COLUMN_CELL_DATA, &key)?;
-            self.delete(COLUMN_CELL_DATA_HASH, &key)?;
+            self.delete(COLUMN_CELL::NAME, &key)?;
+            self.delete(COLUMN_CELL_DATA::NAME, &key)?;
+            self.delete(COLUMN_CELL_DATA_HASH::NAME, &key)?;
         }
         Ok(())
     }
@@ -370,7 +422,7 @@ impl StoreTransaction {
     ) -> Result<(), Error> {
         let position: packed::Uint64 = position_u64.pack();
         self.insert_raw(
-            COLUMN_CHAIN_ROOT_MMR,
+            COLUMN_CHAIN_ROOT_MMR::NAME,
             position.as_slice(),
             header_digest.as_slice(),
         )
@@ -379,7 +431,7 @@ impl StoreTransaction {
     /// Deletes a header digest.
     pub fn delete_header_digest(&self, position_u64: u64) -> Result<(), Error> {
         let position: packed::Uint64 = position_u64.pack();
-        self.delete(COLUMN_CHAIN_ROOT_MMR, position.as_slice())
+        self.delete(COLUMN_CHAIN_ROOT_MMR::NAME, position.as_slice())
     }
 
     /// insert block filter data
@@ -390,19 +442,19 @@ impl StoreTransaction {
         parent_block_filter_hash: &packed::Byte32,
     ) -> Result<(), Error> {
         self.insert_raw(
-            COLUMN_BLOCK_FILTER,
+            COLUMN_BLOCK_FILTER::NAME,
             block_hash.as_slice(),
             filter_data.as_slice(),
         )?;
         let current_block_filter_hash = calc_filter_hash(parent_block_filter_hash, filter_data);
         self.insert_raw(
-            COLUMN_BLOCK_FILTER_HASH,
+            COLUMN_BLOCK_FILTER_HASH::NAME,
             block_hash.as_slice(),
             current_block_filter_hash.as_slice(),
         )?;
         self.insert_raw(
-            COLUMN_META,
-            META_LATEST_BUILT_FILTER_DATA_KEY,
+            COLUMN_META::NAME,
+            COLUMN_META::META_LATEST_BUILT_FILTER_DATA_KEY,
             block_hash.as_slice(),
         )
     }

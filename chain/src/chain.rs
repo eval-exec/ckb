@@ -480,7 +480,7 @@ impl ChainService {
             }
             total_difficulty = cannon_total_difficulty.clone();
         } else {
-            db_txn.insert_block_ext(&block.header().hash(), &ext)?;
+            db_txn.insert_block_ext(block.header().number(), &block.header().hash(), &ext)?;
         }
         db_txn.commit()?;
 
@@ -804,6 +804,7 @@ impl ChainService {
 
                                     self.insert_ok_ext(
                                         &txn,
+                                        b.header().number(),
                                         &b.header().hash(),
                                         ext.clone(),
                                         Some(&cache_entries),
@@ -822,24 +823,46 @@ impl ChainService {
                                 Err(err) => {
                                     self.print_error(b, &err);
                                     found_error = Some(err);
-                                    self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                                    self.insert_failure_ext(
+                                        &txn,
+                                        b.header().number(),
+                                        &b.header().hash(),
+                                        ext.clone(),
+                                    )?;
                                 }
                             }
                         }
                         Err(err) => {
                             found_error = Some(err);
-                            self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                            self.insert_failure_ext(
+                                &txn,
+                                b.header().number(),
+                                &b.header().hash(),
+                                ext.clone(),
+                            )?;
                         }
                     }
                 } else {
-                    self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                    self.insert_failure_ext(
+                        &txn,
+                        b.header().number(),
+                        &b.header().hash(),
+                        ext.clone(),
+                    )?;
                 }
             } else {
                 txn.attach_block(b)?;
                 attach_block_cell(&txn, b)?;
                 mmr.push(b.digest())
                     .map_err(|e| InternalErrorKind::MMR.other(e))?;
-                self.insert_ok_ext(&txn, &b.header().hash(), ext.clone(), None, None)?;
+                self.insert_ok_ext(
+                    &txn,
+                    b.header().number(),
+                    &b.header().hash(),
+                    ext.clone(),
+                    None,
+                    None,
+                )?;
             }
         }
 
@@ -877,6 +900,7 @@ impl ChainService {
     fn insert_ok_ext(
         &self,
         txn: &StoreTransaction,
+        number: BlockNumber,
         hash: &Byte32,
         mut ext: BlockExt,
         cache_entries: Option<&[Completed]>,
@@ -892,17 +916,18 @@ impl ChainService {
             ext.cycles = Some(cycles);
         }
         ext.txs_sizes = txs_sizes;
-        txn.insert_block_ext(hash, &ext)
+        txn.insert_block_ext(number, hash, &ext)
     }
 
     fn insert_failure_ext(
         &self,
         txn: &StoreTransaction,
+        number: BlockNumber,
         hash: &Byte32,
         mut ext: BlockExt,
     ) -> Result<(), Error> {
         ext.verified = Some(false);
-        txn.insert_block_ext(hash, &ext)
+        txn.insert_block_ext(number, hash, &ext)
     }
 
     fn monitor_block_txs_verified(

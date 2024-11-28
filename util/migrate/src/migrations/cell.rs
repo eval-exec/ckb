@@ -34,7 +34,7 @@ impl Migration for CellMigration {
                         .and_then(|hash| chain_db.get_block(&hash)).expect("DB data integrity");
 
                     if block.transactions().len() > 1 {
-                        hashes.push(block.hash());
+                        hashes.push((block.number(),block.hash()));
                     }
                     insert_block_cell(&mut wb, &block);
 
@@ -55,8 +55,8 @@ impl Migration for CellMigration {
 
                 pbi.set_length(size + hashes.len() as u64);
 
-                for hash in hashes {
-                    let txs = chain_db.get_block_body(&hash);
+                for (number,hash) in hashes {
+                    let txs = chain_db.get_block_body(number, &hash);
 
                     delete_consumed_cell(&mut wb, &txs);
                     if wb.size_in_bytes() > MAX_DELETE_BATCH_SIZE {
@@ -76,8 +76,8 @@ impl Migration for CellMigration {
 
 // https://github.com/facebook/rocksdb/issues/1295
 fn clean_cell_column(db: &mut RocksDB) -> Result<(), Error> {
-    db.drop_cf(COLUMN_CELL)?;
-    db.create_cf(COLUMN_CELL)?;
+    db.drop_cf(COLUMN_CELL::NAME)?;
+    db.create_cf(COLUMN_CELL::NAME)?;
     Ok(())
 }
 

@@ -191,7 +191,7 @@ impl Shared {
                 let prefix = pack_number.as_slice();
                 for (key, value) in snapshot
                     .get_iter(
-                        COLUMN_NUMBER_HASH,
+                        COLUMN_NUMBER_HASH::NAME,
                         IteratorMode::From(prefix, Direction::Forward),
                     )
                     .take_while(|(key, _)| key.starts_with(prefix))
@@ -255,7 +255,7 @@ impl Shared {
             .build();
 
         if let Err(e) = self.store.compact_range(
-            COLUMN_BLOCK_BODY,
+            COLUMN_BLOCK_BODY::NAME,
             Some(start_t.as_slice()),
             Some(end_t.as_slice()),
         ) {
