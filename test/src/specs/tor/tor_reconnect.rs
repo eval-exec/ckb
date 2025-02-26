@@ -1,21 +1,22 @@
 use crate::{utils::wait_until, Node, Spec};
 use ckb_logger::{error, info};
 use ckb_util::Mutex;
+use rand::Rng;
 
 use super::TorServer;
 
-pub struct TorConnect {
+pub struct TorReconnect {
     tor_server: Mutex<TorServer>,
 }
 
-impl Default for TorConnect {
+impl Default for TorReconnect {
     fn default() -> Self {
         let tor_server = Mutex::new(TorServer::new(None));
-        TorConnect { tor_server }
+        TorReconnect { tor_server }
     }
 }
 
-impl Spec for TorConnect {
+impl Spec for TorReconnect {
     crate::setup!(num_nodes: 3);
 
     fn before_run(&self) -> Vec<Node> {
@@ -50,8 +51,33 @@ impl Spec for TorConnect {
     }
 
     fn run(&self, nodes: &mut Vec<crate::Node>) {
-        self.tor_server.lock().tor_wait_bootstrap_done();
+        let mut rng = rand::thread_rng();
+        (0..5).for_each(|i| {
+            let reuse_data_dir = rng.gen_bool(0.5);
+            info!(
+                "TorReconnect run test: iter: {}, reuse_data_dir: {}",
+                i, reuse_data_dir
+            );
 
+            self.tor_server.lock().tor_start(reuse_data_dir);
+
+            wait_until(30, || {
+                std::net::TcpStream::connect(&format!(
+                    "127.0.0.1:{}",
+                    self.tor_server.lock().control_port
+                ))
+                .is_ok()
+            });
+            self.tor_server.lock().tor_wait_bootstrap_done();
+            self.run_test(nodes);
+            self.tor_server.lock().shutdown();
+        });
+        info!("TorReconnect run test done!")
+    }
+}
+
+impl TorReconnect {
+    fn run_test(&self, nodes: &mut Vec<crate::Node>) {
         let node0 = &nodes[0];
         let node1 = &nodes[1];
         let node2 = &nodes[2];

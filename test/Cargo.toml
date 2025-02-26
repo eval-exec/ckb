@@ -29,6 +29,7 @@ ckb-logger-config = { path = "../util/logger-config", version = "= 0.200.0-pre" 
 ckb-logger-service = { path = "../util/logger-service", version = "= 0.200.0-pre" }
 ckb-error = { path = "../error", version = "= 0.200.0-pre" }
 ckb-constant = { path = "../util/constant", version = "= 0.200.0-pre" }
+ckb-onion = { path = "../util/onion", version = "= 0.200.0-pre" }
 ckb-db = { path = "../db", version = "= 0.200.0-pre" }
 ckb-store = { path = "../store", version = "= 0.200.0-pre" }
 ckb-shared = { path = "../shared", version = "= 0.200.0-pre" }

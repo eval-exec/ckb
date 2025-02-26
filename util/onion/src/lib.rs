@@ -2,11 +2,19 @@
 
 use std::net::SocketAddr;
 
+use futures::future::BoxFuture;
+use torut::control::{AsyncEvent, ConnError};
+
 /// Onion service module
 pub mod onion_service;
+pub mod tor_controller;
+
+pub use tor_controller::TorController;
 
 #[cfg(test)]
 mod tests;
+
+pub type TorEventHandlerFn = fn(AsyncEvent<'_>) -> BoxFuture<'static, Result<(), ConnError>>;
 
 /// Configuration for onion service
 pub struct OnionServiceConfig {

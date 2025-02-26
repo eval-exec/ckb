@@ -1032,6 +1032,8 @@ impl NetworkService {
                         })
                     };
                     service_builder = service_builder.tcp_onion_config(onion_proxy_url.clone());
+                    service_builder = service_builder
+                        .tcp_onion_random_socks_auth(config.onion.onion_socks_random_auth);
                     info!(
                         "listen_addresse: {:?}, set tcp_onion_config: {:?}",
                         multi_addr, onion_proxy_url

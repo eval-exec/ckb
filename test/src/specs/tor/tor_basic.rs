@@ -1,30 +1,16 @@
-use crate::{Node, Spec};
+use crate::{utils::wait_until, Node, Spec};
 use ckb_logger::{error, info};
 
 use super::TorServer;
 
 pub struct TorServiceContainsPublicAddr {
     tor_server: TorServer,
-    tor_server_process: std::process::Child,
-}
-
-impl Drop for TorServiceContainsPublicAddr {
-    fn drop(&mut self) {
-        match self.tor_server_process.kill() {
-            Ok(_) => info!("tor server process killed"),
-            Err(e) => error!("tor server process kill failed: {:?}", e),
-        }
-    }
 }
 
 impl Default for TorServiceContainsPublicAddr {
     fn default() -> Self {
-        let tor_server = TorServer::new();
-        let tor_server_process = tor_server.tor_start();
-        Self {
-            tor_server,
-            tor_server_process,
-        }
+        let tor_server = TorServer::new(None);
+        Self { tor_server }
     }
 }
 impl Spec for TorServiceContainsPublicAddr {
@@ -48,28 +34,32 @@ impl Spec for TorServiceContainsPublicAddr {
     }
 
     fn run(&self, nodes: &mut Vec<Node>) {
-        // when _tor_server_guard dropped, the tor server will be killed by Drop
+        self.tor_server.tor_wait_bootstrap_done();
 
         let node = &nodes[0];
 
         let rpc_client = node.rpc_client();
-        let node_info = rpc_client.local_node_info();
+        wait_until(30, || {
+            let node_info = rpc_client.local_node_info();
 
-        let node_onion_addrs: Vec<_> = node_info
-            .addresses
-            .iter()
-            .filter(|addr| {
-                // check contains the onion address
-                info!("addr: {:?}", addr.address);
-                addr.address.contains("/onion3")
-            })
-            .collect();
-        assert!(
-            !node_onion_addrs.is_empty(),
-            "node should contains onion address"
-        );
+            info!(
+                "node_onion_p2p_addr: {:?}",
+                node_info
+                    .addresses
+                    .iter()
+                    .map(|addrs| addrs.address.clone())
+                    .collect::<Vec<_>>()
+            );
 
-        let node_onion_p2p_addr: String = node_onion_addrs.first().unwrap().address.clone();
-        info!("node_onion_p2p_addr: {}", node_onion_p2p_addr);
+            let node_onion_addrs: Vec<_> = node_info
+                .addresses
+                .iter()
+                .filter(|addr| {
+                    // check contains the onion address
+                    addr.address.contains("/onion3")
+                })
+                .collect();
+            !node_onion_addrs.is_empty()
+        });
     }
 }

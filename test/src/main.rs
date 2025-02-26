@@ -627,7 +627,8 @@ fn all_specs() -> Vec<Box<dyn Spec>> {
         Box::new(SyncChurn),
         Box::new(TorServiceContainsPublicAddr::default()),
         Box::new(TorConnect::default()),
-        Box::new(TorConnectNormal::default()),
+        Box::new(TorReconnect::default()),
+        Box::new(TorHashPasswordConnect::default()),
     ];
     specs.shuffle(&mut thread_rng());
     specs

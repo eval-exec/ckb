@@ -121,6 +121,9 @@ pub struct OnionConfig {
     pub listen_on_onion: bool,
     // Tor server url: like: 127.0.0.1:9050
     pub onion_server: Option<String>,
+    // use random auth for tor server 
+    #[serde(default = "default_onion_random_auth")]
+    pub onion_socks_random_auth: bool,
     // onion service target, if CKB's p2p listen address not on default 127.0.0.1:8115, you should set this
     pub onion_service_target: Option<String>,
     // path to store onion private key, default is ./data/network/onion/onion_private_key
@@ -134,6 +137,11 @@ pub struct OnionConfig {
 
 /// By default, allow ckb to listen on onion address
 const fn default_listen_on_onion() -> bool {
+    true
+}
+
+/// By default, let ckb to use random auth 
+const fn default_onion_random_auth() -> bool {
     true
 }
 

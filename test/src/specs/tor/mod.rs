@@ -1,42 +1,111 @@
 mod tor_basic;
 mod tor_connect;
-mod tor_connect_normal;
-
-use std::process::Child;
-
-use ckb_logger::info;
+mod tor_hash_password;
+mod tor_reconnect;
+use ckb_async_runtime::Runtime;
+use ckb_logger::{error, info};
+use ckb_onion::TorController;
+use std::{path::Path, process::Child};
+use tempfile::env::temp_dir;
+use tempfile::{tempdir, TempDir};
 pub use tor_basic::*;
 pub use tor_connect::*;
-pub use tor_connect_normal::*;
+pub use tor_hash_password::*;
+pub use tor_reconnect::*;
 
 use crate::{global::obfs4proxy_binary, utils::find_available_port};
 
 // Tor bridge:
-// obfs4 46.226.104.16:23022 CE5E1921FD4CB84D40833C1CF68B0892135B9F04 cert=C/FVw98Zeeoayu7pJSfGwkwOFRtzk4sO20xd3XJtB3kTAuSYv3iXwmfcSkXDgeW3SLKwXw iat-mode=0
-// obfs4 57.129.58.231:36884 9BF12EC5EADF1EF97078BB6E4E1CAA5041A38739 cert=GHa8FrPWOSqkdd7Y/rVQZue+gYnaFNJBXVOxBHE1WUSm/QIlxGNo25QS9kJ18OT8kDPccg iat-mode=0
 const TOR_BRIDGES: &[&str] = &[
- "obfs4 46.226.104.16:23022 CE5E1921FD4CB84D40833C1CF68B0892135B9F04 cert=C/FVw98Zeeoayu7pJSfGwkwOFRtzk4sO20xd3XJtB3kTAuSYv3iXwmfcSkXDgeW3SLKwXw iat-mode=0",
-     "obfs4 57.129.58.231:36884 9BF12EC5EADF1EF97078BB6E4E1CAA5041A38739 cert=GHa8FrPWOSqkdd7Y/rVQZue+gYnaFNJBXVOxBHE1WUSm/QIlxGNo25QS9kJ18OT8kDPccg iat-mode=0"];
+"obfs4 [2605:6400:10:ea:fe01:dc20:ba03:4ff]:443 886CA31F71272FC8B3808C601FA3ABB8A2905DB4 cert=D+zypuFdMpP8riBUbInxIguzqClR0JKkP1DbkKz5es1+OP2Fao8jiXyM+B/+DYA2ZFy6UA iat-mode=0"
 
-#[derive(Clone, Debug)]
+];
+
+#[derive(Debug)]
 struct TorServer {
     tor_command_path: String,
     socks_port: u16,
     control_port: u16,
+    tor_process: Option<Child>,
+    tor_data_dir: Option<TempDir>,
+    controller_password: Option<String>,
+}
+
+impl Drop for TorServer {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
 }
 
 impl TorServer {
-    pub fn new() -> Self {
-        TorServer {
-            tor_command_path: std::option_env!("TOR_COMMAND_PATH")
-                .unwrap_or("tor")
-                .to_string(),
-            socks_port: find_available_port(),
-            control_port: find_available_port(),
+    pub fn shutdown(&mut self) {
+        if let Some(mut process) = self.tor_process.take() {
+            process.kill().unwrap();
+
+            match process.wait() {
+                Ok(exit_status) => {
+                    info!("wait tor process exit: {:?}", exit_status);
+                }
+                Err(err) => {
+                    error!("wait tor process exit error: {:?}", err);
+                }
+            }
         }
     }
+    pub fn tor_wait_bootstrap_done(&self) {
+        let tor_controller_url = format!("127.0.0.1:{}", self.control_port);
+        Runtime::new().unwrap().block_on(async {
+            let tor_controller =
+                ckb_onion::TorController::new(tor_controller_url, None, None).await;
+            let mut tor_controller = tor_controller.unwrap();
+            tor_controller.wait_tor_server_bootstrap_done().await;
+        });
+    }
+    pub fn new(controller_password: Option<String>) -> Self {
+        let tor_command_path = std::option_env!("TOR_COMMAND_PATH")
+            .unwrap_or("tor")
+            .to_string();
+        let mut tor_server = TorServer {
+            tor_command_path,
+            socks_port: find_available_port(),
+            control_port: find_available_port(),
+            tor_process: None,
+            tor_data_dir: Some(tempdir().unwrap()),
+            controller_password,
+        };
+        let tor_process = tor_server.tor_start(false);
+        tor_server.tor_process = Some(tor_process);
+        tor_server
+    }
 
-    fn build_tor_args(&self) -> Vec<String> {
+    fn tor_bridge_args(&self) -> Vec<String> {
+        let mut bridges = Vec::new();
+        for bridge in TOR_BRIDGES {
+            bridges.push("--Bridge".to_string());
+            bridges.push(bridge.to_string());
+        }
+        vec![
+            "--UseBridges".to_string(),
+            "1".to_string(),
+            "--ClientTransportPlugin".to_string(),
+            format!("obfs4 exec {}", obfs4proxy_binary().display()),
+        ]
+        .into_iter()
+        .chain(bridges)
+        .collect()
+    }
+
+    fn tor_hashed_control_password_args(&self) -> Vec<String> {
+        if self.controller_password.is_none() {
+            return vec![];
+        }
+        vec![
+            "--HashedControlPassword".to_string(),
+            self.tor_hashed_password(),
+        ]
+    }
+
+    fn tor_base_args(&self, data_dir: &Path) -> Vec<String> {
         vec![
             "--SocksPort".to_string(),
             self.socks_port.to_string(),
@@ -44,22 +113,41 @@ impl TorServer {
             self.control_port.to_string(),
             "--SafeLogging".to_string(),
             "0".to_string(),
-            "--UseBridges".to_string(),
-            "1".to_string(),
-            "--ClientTransportPlugin".to_string(),
-            format!("obfs4 exec {}", obfs4proxy_binary().display()),
-            "--Bridge".to_string(),
-            TOR_BRIDGES[0].to_string(),
-            "--Bridge".to_string(),
-            TOR_BRIDGES[1].to_string(),
+            "--DataDirectory".to_string(),
+            data_dir.display().to_string(),
         ]
     }
 
-    fn tor_start(&self) -> Child {
+    fn build_tor_args(&self, data_dir: &Path) -> Vec<String> {
+        let args: Vec<String> = self
+            .tor_base_args(data_dir)
+            .into_iter()
+            .chain(self.tor_bridge_args())
+            .chain(self.tor_hashed_control_password_args())
+            .collect();
+        info!("{}", args.join(" "));
+        args
+    }
+
+    fn tor_start(&mut self, reuse_data_dir: bool) -> Child {
         let mut cmd = std::process::Command::new(&self.tor_command_path);
-        let cmd = cmd.args(self.build_tor_args());
+
+        if !reuse_data_dir {
+            self.tor_data_dir = Some(tempdir().unwrap());
+        }
+        let tor_data_dir = self.tor_data_dir.as_ref().unwrap();
+
+        let cmd = cmd.args(self.build_tor_args(tor_data_dir.path()));
         let child = cmd.spawn().unwrap();
-        info!("tor started:({:?}) ; pid: {}", &self, child.id());
         child
+    }
+
+    fn tor_hashed_password(&self) -> String {
+        let mut cmd = std::process::Command::new(&self.tor_command_path);
+        let password = self.controller_password.as_ref().unwrap();
+        cmd.args(["--hash-password", password]);
+        let hashed_password = unsafe { String::from_utf8_unchecked(cmd.output().unwrap().stdout) };
+        info!("got Tor hashed password {} : {}", password, hashed_password);
+        hashed_password
     }
 }

@@ -101,6 +101,9 @@ members = [
 [workspace.dependencies]
 tempfile = "3"
 itertools = "0.11.0"
+p2p = { git="https://github.com/eval-exec/tentacle.git", branch="exec/proxy-and-onion", package = "tentacle", default-features = false }
+multiaddr = { git = "https://github.com/eval-exec/tentacle.git", branch="exec/proxy-and-onion", package = "tentacle-multiaddr" }
+secio = { git = "https://github.com/eval-exec/tentacle.git", branch="exec/proxy-and-onion", package = "tentacle-secio" }
 
 [profile.release]
 overflow-checks = true

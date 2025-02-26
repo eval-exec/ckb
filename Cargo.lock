@@ -1462,6 +1462,7 @@ dependencies = [
  "ckb-logger",
  "ckb-network",
  "ckb-stop-handler",
+ "futures",
  "tempfile",
  "tentacle-multiaddr",
  "tokio",
@@ -4106,7 +4107,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6574,7 +6575,7 @@ dependencies = [
 [[package]]
 name = "tentacle"
 version = "0.6.7"
-source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#a341d279715c9b1b43c21bd3dac747a45e43201f"
+source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#f338466f8c37d296737336516bbf996f1dcc2842"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6607,7 +6608,7 @@ dependencies = [
 [[package]]
 name = "tentacle-multiaddr"
 version = "0.3.5"
-source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#a341d279715c9b1b43c21bd3dac747a45e43201f"
+source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#f338466f8c37d296737336516bbf996f1dcc2842"
 dependencies = [
  "arrayref",
  "bs58",
@@ -6622,7 +6623,7 @@ dependencies = [
 [[package]]
 name = "tentacle-secio"
 version = "0.6.5"
-source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#a341d279715c9b1b43c21bd3dac747a45e43201f"
+source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#f338466f8c37d296737336516bbf996f1dcc2842"
 dependencies = [
  "bs58",
  "bytes",
@@ -6977,7 +6978,7 @@ dependencies = [
 [[package]]
 name = "tokio-yamux"
 version = "0.3.10"
-source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#a341d279715c9b1b43c21bd3dac747a45e43201f"
+source = "git+https://github.com/eval-exec/tentacle.git?branch=exec/proxy-and-onion#f338466f8c37d296737336516bbf996f1dcc2842"
 dependencies = [
  "bytes",
  "futures",
@@ -7638,7 +7639,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
