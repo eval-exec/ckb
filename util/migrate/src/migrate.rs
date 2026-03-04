@@ -32,6 +32,7 @@ impl Migrate {
         migrations.add_migration(Arc::new(migrations::AddBlockFilterColumnFamily)); // since v0.105.0
         migrations.add_migration(Arc::new(migrations::AddBlockFilterHash)); // since v0.108.0
         migrations.add_migration(Arc::new(migrations::BlockExt2019ToZero::new(hardforks))); // since v0.111.1
+        migrations.add_migration(Arc::new(migrations::RefactorRocksdbSchema)); // breaking db schema refactor
 
         Migrate {
             migrations,

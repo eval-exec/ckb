@@ -9,9 +9,8 @@ use ckb_db_schema::{
     COLUMN_BLOCK_FILTER, COLUMN_BLOCK_FILTER_HASH, COLUMN_BLOCK_HEADER, COLUMN_BLOCK_PROPOSAL_IDS,
     COLUMN_BLOCK_UNCLE, COLUMN_CELL, COLUMN_CELL_DATA, COLUMN_CELL_DATA_HASH,
     COLUMN_CHAIN_ROOT_MMR, COLUMN_EPOCH, COLUMN_HASH_INDEX, COLUMN_INDEX, COLUMN_META,
-    COLUMN_TRANSACTION_INFO,
-    COLUMN_UNCLES, Col, META_CURRENT_EPOCH_KEY, META_LATEST_BUILT_FILTER_DATA_KEY,
-    META_TIP_HEADER_KEY,
+    COLUMN_TRANSACTION_INFO, COLUMN_UNCLES, Col, META_CURRENT_EPOCH_KEY,
+    META_LATEST_BUILT_FILTER_DATA_KEY, META_TIP_HEADER_KEY,
 };
 use ckb_freezer::Freezer;
 use ckb_types::{
@@ -436,7 +435,13 @@ pub trait ChainStore: Send + Sync + Sized {
             let tx_reader = raw_block_reader.transactions().get(tx_info.index)?;
             return Some((tx_reader.to_entity().into_view(), tx_info));
         }
-        self.get(COLUMN_BLOCK_BODY, tx_info.key().as_slice())
+        let tx_key = tx_info
+            .block_hash
+            .to_tx_key(tx_info.block_number, tx_info.index as u32);
+
+        self.get(COLUMN_BLOCK_BODY, &tx_key)
+            // fallback to old key layout for partially migrated/legacy data
+            .or_else(|| self.get(COLUMN_BLOCK_BODY, tx_info.key().as_slice()))
             .map(|slice| {
                 let reader = packed::TransactionViewReader::from_slice_should_be_ok(slice.as_ref());
                 (reader.into(), tx_info)
