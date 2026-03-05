@@ -28,30 +28,129 @@ fn data_corrupted(message: String) -> Error {
     InternalErrorKind::DataCorrupted.other(message).into()
 }
 
+fn scan_max_number_from_index(chain_db: &ChainDB) -> Option<BlockNumber> {
+    chain_db
+        .get_iter(COLUMN_INDEX, IteratorMode::Start)
+        .filter_map(|(key, _)| {
+            if key.len() == 8 {
+                Some(packed::Uint64Reader::from_slice_should_be_ok(key.as_ref()).into())
+            } else {
+                None
+            }
+        })
+        .max()
+}
+
+fn scan_max_number_from_number_hash(chain_db: &ChainDB) -> Option<BlockNumber> {
+    chain_db
+        .get_iter(COLUMN_NUMBER_HASH, IteratorMode::Start)
+        .map(|(key, _)| {
+            let reader = packed::NumberHashReader::from_slice_should_be_ok(key.as_ref());
+            reader.number().into()
+        })
+        .max()
+}
+
+fn scan_max_number_from_block_header(chain_db: &ChainDB) -> Option<BlockNumber> {
+    let mut max_number = None;
+    let mut block_key_count = 0u64;
+    let mut old_hash_key_count = 0u64;
+    for (key, _) in chain_db.get_iter(COLUMN_BLOCK_HEADER, IteratorMode::Start) {
+        match key.len() {
+            40 => {
+                block_key_count += 1;
+                if let Some(number) = packed::Byte32::block_number_from_key(key.as_ref()) {
+                    max_number = Some(max_number.map_or(number, |old| cmp::max(old, number)));
+                }
+            }
+            32 => {
+                old_hash_key_count += 1;
+            }
+            _ => {}
+        }
+    }
+    eprintln!(
+        "[refactor-migration] scan COLUMN_BLOCK_HEADER: block_key_count={block_key_count}, old_hash_key_count={old_hash_key_count}, max_number={max_number:?}"
+    );
+    max_number
+}
+
 fn get_tip_number(chain_db: &ChainDB) -> Result<BlockNumber, Error> {
     let tip_hash_raw = chain_db
         .get(COLUMN_META, META_TIP_HEADER_KEY)
         .ok_or_else(|| data_corrupted("missing META_TIP_HEADER_KEY".to_owned()))?;
     let tip_hash = packed::Byte32Reader::from_slice_should_be_ok(tip_hash_raw.as_ref()).to_entity();
+    eprintln!("[refactor-migration] META_TIP_HEADER_KEY={tip_hash}");
+
+    let mut tip_number = None;
 
     // Old schema path: COLUMN_INDEX stores hash -> number.
     if let Some(raw) = chain_db.get(COLUMN_INDEX, tip_hash.as_slice()) {
         let number: BlockNumber =
             packed::Uint64Reader::from_slice_should_be_ok(raw.as_ref()).into();
-        return Ok(number);
+        eprintln!("[refactor-migration] tip number from COLUMN_INDEX(hash->number): {number}");
+        tip_number = Some(number);
+    } else {
+        eprintln!("[refactor-migration] no COLUMN_INDEX(hash->number) for tip hash");
     }
 
     // New schema path: COLUMN_HASH_INDEX stores hash -> [number + is_main_chain].
     if let Some(raw) = chain_db.get(COLUMN_HASH_INDEX, tip_hash.as_slice())
         && let Some(number) = packed::Byte32::number_from_index_value(raw.as_ref())
     {
-        return Ok(number);
+        let is_main_chain = packed::Byte32::is_main_chain_from_index_value(raw.as_ref());
+        eprintln!(
+            "[refactor-migration] tip number from COLUMN_HASH_INDEX: {number}, is_main_chain={is_main_chain:?}"
+        );
+        tip_number = Some(tip_number.map_or(number, |old| cmp::max(old, number)));
+    } else {
+        eprintln!("[refactor-migration] no valid COLUMN_HASH_INDEX for tip hash");
     }
 
     // Fallback for very old DB states: resolve tip number from old header payload.
     if let Some(raw_header) = chain_db.get(COLUMN_BLOCK_HEADER, tip_hash.as_slice()) {
         let header_reader = packed::HeaderViewReader::from_slice_should_be_ok(raw_header.as_ref());
-        return Ok(header_reader.data().raw().number().into());
+        let number: BlockNumber = header_reader.data().raw().number().into();
+        eprintln!("[refactor-migration] tip number from old COLUMN_BLOCK_HEADER(hash): {number}");
+        tip_number = Some(tip_number.map_or(number, |old| cmp::max(old, number)));
+    } else {
+        eprintln!("[refactor-migration] no old COLUMN_BLOCK_HEADER(hash) for tip hash");
+    }
+
+    if let Some(number) = tip_number
+        && number > 0
+    {
+        eprintln!("[refactor-migration] resolved tip number directly: {number}");
+        return Ok(number);
+    }
+
+    // When tip resolves to genesis (or cannot be resolved from tip hash),
+    // cross-check by scanning height indices. This prevents false 0/1 migrations
+    // when META_TIP_HEADER_KEY is stale or hash->number mappings are absent.
+    let mut scanned_max = 0;
+    let scanned_max_index = scan_max_number_from_index(chain_db);
+    let scanned_max_number_hash = scan_max_number_from_number_hash(chain_db);
+    let scanned_max_block_header = scan_max_number_from_block_header(chain_db);
+    eprintln!(
+        "[refactor-migration] scanned max from COLUMN_INDEX(number->hash): {scanned_max_index:?}, COLUMN_NUMBER_HASH: {scanned_max_number_hash:?}, COLUMN_BLOCK_HEADER(block_key): {scanned_max_block_header:?}"
+    );
+    if let Some(number) = scanned_max_index {
+        scanned_max = cmp::max(scanned_max, number);
+    }
+    if let Some(number) = scanned_max_number_hash {
+        scanned_max = cmp::max(scanned_max, number);
+    }
+    if let Some(number) = scanned_max_block_header {
+        scanned_max = cmp::max(scanned_max, number);
+    }
+    if scanned_max > 0 {
+        eprintln!("[refactor-migration] resolved tip number from scan fallback: {scanned_max}");
+        return Ok(scanned_max);
+    }
+
+    if let Some(number) = tip_number {
+        eprintln!("[refactor-migration] fallback to resolved tip number: {number}");
+        return Ok(number);
     }
 
     Err(data_corrupted(format!(
@@ -279,6 +378,9 @@ impl Migration for RefactorRocksdbSchema {
         let total_numbers = tip_number + 1;
         let chunk_size = total_numbers / worker_count;
         let remainder = total_numbers % worker_count;
+        eprintln!(
+            "[refactor-migration] plan: tip_number={tip_number}, total_numbers={total_numbers}, worker_count={worker_count}, chunk_size={chunk_size}, remainder={remainder}"
+        );
 
         let handles: Vec<_> = (0..worker_count)
             .map(|i| {
@@ -287,6 +389,9 @@ impl Migration for RefactorRocksdbSchema {
                 let start = i * chunk_size + cmp::min(i, remainder);
                 let len = chunk_size + u64::from(i < remainder);
                 let end = start + len;
+                eprintln!(
+                    "[refactor-migration] worker#{i} range=[{start}, {end}) len={len}"
+                );
 
                 let pbi = pb(len);
                 pbi.set_style(
@@ -301,6 +406,9 @@ impl Migration for RefactorRocksdbSchema {
                 pbi.enable_steady_tick(std::time::Duration::from_millis(5000));
 
                 std::thread::spawn(move || -> Result<(), Error> {
+                    eprintln!(
+                        "[refactor-migration] worker#{i} started range=[{start}, {end})"
+                    );
                     let mut wb = chain_db.new_write_batch();
 
                     for number in start..end {
@@ -321,6 +429,9 @@ impl Migration for RefactorRocksdbSchema {
                         chain_db.write(&wb)?;
                     }
                     pbi.finish_with_message("done");
+                    eprintln!(
+                        "[refactor-migration] worker#{i} finished range=[{start}, {end})"
+                    );
                     Ok(())
                 })
             })

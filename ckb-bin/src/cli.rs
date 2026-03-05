@@ -117,6 +117,8 @@ pub const ARG_OVERWRITE_CHAIN_SPEC: &str = "overwrite-spec";
 pub const ARG_ASSUME_VALID_TARGET: &str = "assume-valid-target";
 /// Command line argument `--check`.
 pub const ARG_MIGRATE_CHECK: &str = "check";
+/// Command line argument `--set-db-version`.
+pub const ARG_MIGRATE_SET_DB_VERSION: &str = "set-db-version";
 /// Command line argument `daemon --check`
 pub const ARG_DAEMON_CHECK: &str = "check";
 /// Command line argument `daemon --stop`
@@ -472,6 +474,15 @@ fn migrate() -> Command {
                 .long(ARG_INCLUDE_BACKGROUND)
                 .action(clap::ArgAction::SetTrue)
                 .help("Whether include background migrations"),
+        )
+        .arg(
+            Arg::new(ARG_MIGRATE_SET_DB_VERSION)
+                .long(ARG_MIGRATE_SET_DB_VERSION)
+                .value_name("version")
+                .conflicts_with(ARG_MIGRATE_CHECK)
+                .help(
+                    "Set database migration version directly (testing only), for example 20231101000000",
+                ),
         )
 }
 

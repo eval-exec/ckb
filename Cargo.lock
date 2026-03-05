@@ -804,6 +804,8 @@ dependencies = [
  "ckb-chain-spec",
  "ckb-channel",
  "ckb-constant",
+ "ckb-db",
+ "ckb-db-schema",
  "ckb-instrument",
  "ckb-jsonrpc-types",
  "ckb-launcher",

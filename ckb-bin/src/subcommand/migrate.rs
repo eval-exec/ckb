@@ -1,4 +1,6 @@
 use ckb_app_config::{ExitCode, MigrateArgs};
+use ckb_db::RocksDB;
+use ckb_db_schema::{COLUMNS, MIGRATION_VERSION_KEY};
 use ckb_migrate::migrate::Migrate;
 use is_terminal::IsTerminal;
 use std::cmp::Ordering;
@@ -7,6 +9,26 @@ use crate::helper::prompt;
 
 pub fn migrate(args: MigrateArgs) -> Result<(), ExitCode> {
     let migrate = Migrate::new(&args.config.db.path, args.consensus.hardfork_switch);
+
+    if let Some(version) = args.set_db_version.as_ref() {
+        let read_only_db = migrate.open_read_only_db().map_err(|e| {
+            eprintln!("Migration error {e}");
+            ExitCode::Failure
+        })?;
+        if read_only_db.is_none() {
+            eprintln!("Run error: no database found to set db-version");
+            return Err(ExitCode::Failure);
+        }
+
+        let db = RocksDB::open(&args.config.db, COLUMNS);
+        db.put_default(MIGRATION_VERSION_KEY, version.as_bytes())
+            .map_err(|e| {
+                eprintln!("Run error: failed to set db-version: {e}");
+                ExitCode::Failure
+            })?;
+        eprintln!("Set db-version to {version}");
+        return Ok(());
+    }
 
     {
         let read_only_db = migrate.open_read_only_db().map_err(|e| {

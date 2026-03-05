@@ -50,6 +50,8 @@ fdlimit.workspace = true
 ckb-stop-handler.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 time = { workspace = true }
+ckb-db.workspace = true
+ckb-db-schema.workspace = true
 
 [target.'cfg(not(target_os="windows"))'.dependencies]
 daemonize-me = { version = "2" }

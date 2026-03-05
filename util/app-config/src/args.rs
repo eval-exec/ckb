@@ -235,6 +235,8 @@ pub struct MigrateArgs {
     pub force: bool,
     /// Whether include background migrations
     pub include_background: bool,
+    /// Set database migration version directly (testing only).
+    pub set_db_version: Option<String>,
 }
 
 impl CustomizeSpec {
