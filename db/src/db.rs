@@ -83,9 +83,9 @@ impl RocksDB {
 
             // Per-column block size optimization
             let block_size = match cf.name() {
-                "2" => 4 * 1024,       // COLUMN_BLOCK_BODY: 4KB to optimize random tx lookups & cache
+                "2" => 4 * 1024, // COLUMN_BLOCK_BODY: 4KB to optimize random tx lookups & cache
                 "1" | "3" | "6" | "15" | "17" | "18" => 8 * 1024, // Block headers etc: 8KB
-                _ => 4 * 1024,         // Others: 4KB
+                _ => 4 * 1024,   // Others: 4KB
             };
             block_opts.set_block_size(block_size);
 
