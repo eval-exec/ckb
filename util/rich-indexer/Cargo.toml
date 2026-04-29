@@ -1,6 +1,6 @@
 [package]
 name = "ckb-rich-indexer"
-version = "1.1.0"
+version = "1.1.1"
 license = "MIT"
 authors = ["Nervos Core Dev <dev@nervos.org>"]
 edition = "2024"
@@ -19,6 +19,7 @@ ckb-indexer-sync.workspace = true
 ckb-jsonrpc-types.workspace = true
 ckb-notify.workspace = true
 ckb-types.workspace = true
+ckb-metrics.workspace = true
 futures.workspace = true
 log.workspace = true
 sql-builder.workspace = true
