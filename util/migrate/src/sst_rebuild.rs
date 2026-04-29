@@ -12,6 +12,7 @@ use ckb_db_schema::{
 use ckb_error::{Error, InternalErrorKind};
 use ckb_logger::info;
 use ckb_types::{block_number_to_key, core::BlockNumber, packed, prelude::*};
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
@@ -30,6 +31,10 @@ const REWRITE_SPILL_FLUSH_BYTES: usize = 256 * 1024 * 1024;
 const COPY_SST_ENTRY_LIMIT: u64 = 1_000_000;
 const COPY_SST_BYTES_LIMIT: usize = 256 * 1024 * 1024;
 const COPY_COLUMN_PARALLELISM: usize = 4;
+const SPILL_RECORD_FLAG_LZ4_VALUE: u8 = 1;
+const SPILL_RECORD_HEADER_BYTES: usize = 13;
+const SPILL_VALUE_COMPRESSION_MIN_BYTES: usize = 256;
+const SPILL_VALUE_COMPRESSION_MAX_PERCENT: usize = 95;
 
 #[derive(Copy, Clone)]
 struct ColumnMapping {
@@ -142,17 +147,63 @@ struct GeneratedSst {
     entries: u64,
 }
 
-#[derive(Eq, PartialEq)]
 struct BufferedEntry {
     key: Vec<u8>,
-    value: Vec<u8>,
+    value: SpillValue,
 }
+
+enum SpillValue {
+    Raw(Vec<u8>),
+    Lz4 {
+        compressed: Vec<u8>,
+        uncompressed_len: usize,
+    },
+}
+
+#[derive(Default)]
+struct SpillCompressionStats {
+    records: u64,
+    compressed_records: u64,
+    raw_value_bytes: u64,
+    stored_value_bytes: u64,
+}
+
+struct SpillRecordWriteStats {
+    compressed: bool,
+    raw_value_bytes: usize,
+    stored_value_bytes: usize,
+}
+
+impl SpillCompressionStats {
+    fn add_record(&mut self, stats: SpillRecordWriteStats) {
+        self.records += 1;
+        self.raw_value_bytes += stats.raw_value_bytes as u64;
+        self.stored_value_bytes += stats.stored_value_bytes as u64;
+        if stats.compressed {
+            self.compressed_records += 1;
+        }
+    }
+
+    fn stored_percent(&self) -> f64 {
+        if self.raw_value_bytes == 0 {
+            100.0
+        } else {
+            self.stored_value_bytes as f64 * 100.0 / self.raw_value_bytes as f64
+        }
+    }
+}
+
+impl PartialEq for BufferedEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for BufferedEntry {}
 
 impl Ord for BufferedEntry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key
-            .cmp(&other.key)
-            .then_with(|| self.value.cmp(&other.value))
+        self.key.cmp(&other.key)
     }
 }
 
@@ -178,6 +229,7 @@ struct RewriteSpill {
     buffers: BTreeMap<BlockNumber, SpillBuffer>,
     paths: BTreeMap<BlockNumber, PathBuf>,
     buffered_bytes: usize,
+    compression_stats: SpillCompressionStats,
 }
 
 struct SpillRecordIter {
@@ -741,17 +793,21 @@ impl RewriteSpill {
             buffers: BTreeMap::new(),
             paths: BTreeMap::new(),
             buffered_bytes: 0,
+            compression_stats: SpillCompressionStats::default(),
         })
     }
 
     fn push(&mut self, number: BlockNumber, key: Vec<u8>, value: Vec<u8>) -> Result<(), Error> {
         let start = number / RANGE_BLOCKS * RANGE_BLOCKS;
-        let entry_bytes = key.len() + value.len() + 8;
+        let entry_bytes = key.len() + value.len() + SPILL_RECORD_HEADER_BYTES;
         let buffer = self.buffers.entry(start).or_insert_with(|| SpillBuffer {
             entries: Vec::new(),
             bytes: 0,
         });
-        buffer.entries.push(BufferedEntry { key, value });
+        buffer.entries.push(BufferedEntry {
+            key,
+            value: SpillValue::Raw(value),
+        });
         buffer.bytes += entry_bytes;
         self.buffered_bytes += entry_bytes;
 
@@ -790,7 +846,8 @@ impl RewriteSpill {
                 })?;
             let mut writer = BufWriter::new(file);
             for entry in buffer.entries {
-                write_spill_record(&mut writer, &entry.key, &entry.value)?;
+                let stats = write_spill_record(&mut writer, &entry.key, entry.value)?;
+                self.compression_stats.add_record(stats);
             }
             writer.flush().map_err(|err| {
                 internal_error(format!(
@@ -801,7 +858,15 @@ impl RewriteSpill {
             self.paths.insert(start, path);
         }
 
-        info!("SST rebuild: flushed spill buffers for column {}", self.col);
+        info!(
+            "SST rebuild: flushed spill buffers for column {}, lz4_values={}/{}, value_bytes={}=>{} ({:.1}%)",
+            self.col,
+            self.compression_stats.compressed_records,
+            self.compression_stats.records,
+            self.compression_stats.raw_value_bytes,
+            self.compression_stats.stored_value_bytes,
+            self.compression_stats.stored_percent()
+        );
         self.buffered_bytes = 0;
         Ok(())
     }
@@ -897,7 +962,18 @@ fn write_spilled_shard(
     let generated = write_sst_file(col, path, |writer, last_key| {
         let count = entries.len() as u64;
         for entry in entries {
-            put_sorted(writer, last_key, &entry.key, &entry.value)?;
+            match entry.value {
+                SpillValue::Raw(value) => {
+                    put_sorted(writer, last_key, &entry.key, &value)?;
+                }
+                SpillValue::Lz4 {
+                    compressed,
+                    uncompressed_len,
+                } => {
+                    let value = decompress_spill_value(&compressed, uncompressed_len)?;
+                    put_sorted(writer, last_key, &entry.key, &value)?;
+                }
+            }
         }
         Ok(count)
     })?;
@@ -906,40 +982,123 @@ fn write_spilled_shard(
     Ok(generated)
 }
 
-fn write_spill_record(writer: &mut BufWriter<File>, key: &[u8], value: &[u8]) -> Result<(), Error> {
-    write_spill_record_io(writer, key, value)
+fn write_spill_record(
+    writer: &mut BufWriter<File>,
+    key: &[u8],
+    value: SpillValue,
+) -> Result<SpillRecordWriteStats, Error> {
+    let SpillValue::Raw(value) = value else {
+        return Err(internal_error(
+            "spill buffers must contain raw values before writing",
+        ));
+    };
+    write_spill_record_io(writer, key, &value)
         .map_err(|err| internal_error(format!("failed to write spill record: {err}")))
 }
 
-fn write_spill_record_io(writer: &mut impl Write, key: &[u8], value: &[u8]) -> io::Result<()> {
+fn write_spill_record_io(
+    writer: &mut impl Write,
+    key: &[u8],
+    value: &[u8],
+) -> io::Result<SpillRecordWriteStats> {
     let key_len = u32::try_from(key.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "spill key too large"))?;
     let value_len = u32::try_from(value.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "spill value too large"))?;
+    let (flags, compressed_value) = encode_spill_value(value);
+    let stored_value = compressed_value.as_deref().unwrap_or(value);
+    let stored_value_len = u32::try_from(stored_value.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "spill value too large"))?;
+
     writer
-        .write_all(&key_len.to_le_bytes())
+        .write_all(&[flags])
+        .and_then(|_| writer.write_all(&key_len.to_le_bytes()))
         .and_then(|_| writer.write_all(&value_len.to_le_bytes()))
+        .and_then(|_| writer.write_all(&stored_value_len.to_le_bytes()))
         .and_then(|_| writer.write_all(key))
-        .and_then(|_| writer.write_all(value))
+        .and_then(|_| writer.write_all(stored_value))?;
+
+    Ok(SpillRecordWriteStats {
+        compressed: flags & SPILL_RECORD_FLAG_LZ4_VALUE != 0,
+        raw_value_bytes: value.len(),
+        stored_value_bytes: stored_value.len(),
+    })
+}
+
+fn encode_spill_value(value: &[u8]) -> (u8, Option<Vec<u8>>) {
+    if value.len() < SPILL_VALUE_COMPRESSION_MIN_BYTES {
+        return (0, None);
+    }
+
+    let compressed = compress_prepend_size(value);
+    let max_stored_len = value.len() * SPILL_VALUE_COMPRESSION_MAX_PERCENT / 100;
+    if compressed.len() <= max_stored_len {
+        (SPILL_RECORD_FLAG_LZ4_VALUE, Some(compressed))
+    } else {
+        (0, None)
+    }
 }
 
 fn read_spill_record_io(reader: &mut impl Read) -> io::Result<Option<BufferedEntry>> {
-    let mut key_len_bytes = [0u8; 4];
-    match reader.read_exact(&mut key_len_bytes) {
+    let mut flags = [0u8; 1];
+    match reader.read_exact(&mut flags) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(err) => return Err(err),
     }
 
+    if flags[0] & !SPILL_RECORD_FLAG_LZ4_VALUE != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unknown spill record flags: {}", flags[0]),
+        ));
+    }
+
+    let mut key_len_bytes = [0u8; 4];
     let mut value_len_bytes = [0u8; 4];
+    let mut stored_value_len_bytes = [0u8; 4];
+    reader.read_exact(&mut key_len_bytes)?;
     reader.read_exact(&mut value_len_bytes)?;
+    reader.read_exact(&mut stored_value_len_bytes)?;
+
     let key_len = u32::from_le_bytes(key_len_bytes) as usize;
     let value_len = u32::from_le_bytes(value_len_bytes) as usize;
+    let stored_value_len = u32::from_le_bytes(stored_value_len_bytes) as usize;
     let mut key = vec![0u8; key_len];
-    let mut value = vec![0u8; value_len];
+    let mut stored_value = vec![0u8; stored_value_len];
     reader.read_exact(&mut key)?;
-    reader.read_exact(&mut value)?;
+    reader.read_exact(&mut stored_value)?;
+
+    let value = if flags[0] & SPILL_RECORD_FLAG_LZ4_VALUE != 0 {
+        SpillValue::Lz4 {
+            compressed: stored_value,
+            uncompressed_len: value_len,
+        }
+    } else {
+        if stored_value_len != value_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "raw spill value length mismatch: value_len={value_len}, stored_value_len={stored_value_len}"
+                ),
+            ));
+        }
+        SpillValue::Raw(stored_value)
+    };
+
     Ok(Some(BufferedEntry { key, value }))
+}
+
+fn decompress_spill_value(compressed: &[u8], expected_len: usize) -> Result<Vec<u8>, Error> {
+    let value = decompress_size_prepended(compressed)
+        .map_err(|err| internal_error(format!("failed to decompress LZ4 spill value: {err}")))?;
+    if value.len() != expected_len {
+        return Err(internal_error(format!(
+            "decompressed LZ4 spill value has invalid length: expected {expected_len}, actual {}",
+            value.len()
+        )));
+    }
+    Ok(value)
 }
 
 fn write_sst_file<F>(col: Col, path: PathBuf, write_entries: F) -> Result<GeneratedSst, Error>
@@ -1134,4 +1293,49 @@ fn tx_index_from_old_key(key: &[u8]) -> Result<u32, Error> {
     Ok(u32::from_be_bytes(
         key[32..36].try_into().expect("slice len checked"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spill_record_keeps_small_values_raw() {
+        let mut bytes = Vec::new();
+        let stats = write_spill_record_io(&mut bytes, b"key", b"small-value").unwrap();
+        assert!(!stats.compressed);
+
+        let mut cursor = io::Cursor::new(bytes);
+        let entry = read_spill_record_io(&mut cursor).unwrap().unwrap();
+        assert_eq!(entry.key, b"key");
+        match entry.value {
+            SpillValue::Raw(value) => assert_eq!(value, b"small-value"),
+            SpillValue::Lz4 { .. } => panic!("small value should not be compressed"),
+        }
+        assert!(read_spill_record_io(&mut cursor).unwrap().is_none());
+    }
+
+    #[test]
+    fn spill_record_compresses_repetitive_values_with_lz4() {
+        let value = vec![7u8; 4096];
+        let mut bytes = Vec::new();
+        let stats = write_spill_record_io(&mut bytes, b"key", &value).unwrap();
+        assert!(stats.compressed);
+        assert!(stats.stored_value_bytes < stats.raw_value_bytes);
+
+        let mut cursor = io::Cursor::new(bytes);
+        let entry = read_spill_record_io(&mut cursor).unwrap().unwrap();
+        assert_eq!(entry.key, b"key");
+        match entry.value {
+            SpillValue::Raw(_) => panic!("repetitive value should be compressed"),
+            SpillValue::Lz4 {
+                compressed,
+                uncompressed_len,
+            } => {
+                let decoded = decompress_spill_value(&compressed, uncompressed_len).unwrap();
+                assert_eq!(decoded, value);
+            }
+        }
+        assert!(read_spill_record_io(&mut cursor).unwrap().is_none());
+    }
 }
