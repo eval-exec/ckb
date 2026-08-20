@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0](https://github.com/nervosnetwork/ckb/compare/ckb-script-v1.1.1...ckb-script-v1.2.0) - 2026-07-28
+
+### Added
+
+- *(script)* remove the code that suspend and resume the scheduler via a fully suspended state (#5262) (by @mohanson)
+
+### Fixed
+
+- simplify removal of terminated VMs by using remove instead of retain (#5254) (by @mohanson)
+
+### Contributors
+
+- @mohanson
+
+## [1.1.1](https://github.com/nervosnetwork/ckb/compare/ckb-script-v1.1.0...ckb-script-v1.1.1) - 2026-06-08
+
+### Changed
+
+- Merge commit from fork (by @Officeyutong)
+- Merge commit from fork (by @Officeyutong)
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Fixed
+
+- fix overflows (by @chenyukang)
+
+### Contributors
+
+- @Officeyutong
+- @chenyukang
+- @eval-exec
+
 ## [1.1.0](https://github.com/nervosnetwork/ckb/compare/ckb-script-v1.0.2...ckb-script-v1.1.0) - 2026-03-02
 
 ### Added

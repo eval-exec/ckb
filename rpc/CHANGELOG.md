@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0](https://github.com/nervosnetwork/ckb/compare/ckb-rpc-v1.2.3...ckb-rpc-v1.3.0) - 2026-07-28
+
+### Added
+
+- add bearer token authentication for miner notify mode (#5257) (by @zhangsoledad)
+- *(rpc)* include block hash in live cell response (#5269) (by @quake)
+
+### Changed
+
+- Upgrade tentacle dependencies (#5277) (by @eval-exec)
+- skip fee statistics blocks without tx sizes (#5252) (by @chenyukang)
+
+### Fixed
+
+- Fix clippy and format issues (#5263) (by @chenyukang)
+- Fix some public security issues (#5219) (by @Officeyutong)
+- *(rpc)* reject duplicate/oversized indices in transaction proof verification (by @eval-exec)
+- *(test)* stabilize RPC test teardown (#5260) (by @chenyukang)
+
+### Contributors
+
+- @zhangsoledad
+- @eval-exec
+- @quake
+- @chenyukang
+- @Officeyutong
+
+## [1.2.3](https://github.com/nervosnetwork/ckb/compare/ckb-rpc-v1.2.2...ckb-rpc-v1.2.3) - 2026-06-08
+
+### Changed
+
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Fixed
+
+- fix overflows (by @chenyukang)
+- Fix RPC test chain service teardown on Windows (#5213) (by @chenyukang)
+- fix some comments to improve readability (#5209) (by @caltechustc)
+
+### Contributors
+
+- @chenyukang
+- @caltechustc
+- @eval-exec
+
+## [1.2.2](https://github.com/nervosnetwork/ckb/compare/ckb-rpc-v1.2.1...ckb-rpc-v1.2.2) - 2026-04-24
+
+### Changed
+
+- *(rpc)* correct PRC typo in docs and comments (#5130) (by @eval-exec)
+
+### Fixed
+
+- ensure temporary directories are cleaned up after tests (#5163) (by @jetjinser)
+- generate GitHub-compatible RPC doc anchors (#5136) (by @eval-exec)
+- overhaul proposal selection and prioritization logic (#5023) (by @zhangsoledad)
+
+### Contributors
+
+- @jetjinser
+- @eval-exec
+- @zhangsoledad
+
 ## [1.2.1](https://github.com/nervosnetwork/ckb/compare/ckb-rpc-v1.2.0...ckb-rpc-v1.2.1) - 2026-03-08
 
 ### Changed

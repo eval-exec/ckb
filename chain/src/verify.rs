@@ -24,8 +24,10 @@ use ckb_verification::cache::Completed;
 use ckb_verification_contextual::{ContextualBlockVerifier, VerifyContext};
 use ckb_verification_traits::Switch;
 use dashmap::DashSet;
+use std::any::Any;
 use std::cmp;
 use std::collections::HashSet;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 pub(crate) struct ConsumeUnverifiedBlockProcessor {
@@ -79,7 +81,19 @@ impl ConsumeUnverifiedBlocks {
                         let _ = self.tx_pool_controller.suspend_chunk_process();
 
                         let _trace_now = minstant::Instant::now();
-                        self.processor.consume_unverified_blocks(unverified_task);
+                        let block_hash = unverified_task.block.hash();
+                        let block_number = unverified_task.block.number();
+                        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+                            self.processor.consume_unverified_blocks(unverified_task);
+                        })) {
+                            error!(
+                                "consume unverified block {}-{} panicked: {}",
+                                block_number,
+                                block_hash,
+                                panic_payload_to_string(payload.as_ref())
+                            );
+                            self.processor.is_pending_verify.remove(&block_hash);
+                        }
                         if let Some(handle) = ckb_metrics::handle() {
                             handle.ckb_chain_consume_unverified_block_duration.observe(_trace_now.elapsed().as_secs_f64())
                         }
@@ -306,6 +320,7 @@ impl ConsumeUnverifiedBlockProcessor {
         let _snapshot_tip_hash = db_txn.get_update_for_tip_hash(&txn_snapshot);
 
         db_txn.insert_block_epoch_index(
+            block.number(),
             &block.header().hash(),
             &epoch.last_block_hash_in_previous_epoch(),
         )?;
@@ -340,7 +355,7 @@ impl ConsumeUnverifiedBlockProcessor {
                 db_txn.insert_current_epoch_ext(&epoch)?;
             }
         } else {
-            db_txn.insert_block_ext(&block.header().hash(), &ext)?;
+            db_txn.insert_block_ext(block.number(), &block.header().hash(), &ext)?;
         }
         db_txn.commit()?;
 
@@ -671,7 +686,8 @@ impl ConsumeUnverifiedBlockProcessor {
 
                                     self.insert_ok_ext(
                                         &txn,
-                                        &b.header().hash(),
+                                        b.number(),
+                                        &b.hash(),
                                         ext.clone(),
                                         Some(&cache_entries),
                                         Some(txs_sizes),
@@ -689,24 +705,29 @@ impl ConsumeUnverifiedBlockProcessor {
                                 Err(err) => {
                                     self.print_error(b, &err);
                                     found_error = Some(err);
-                                    self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                                    self.insert_failure_ext(
+                                        &txn,
+                                        b.number(),
+                                        &b.hash(),
+                                        ext.clone(),
+                                    )?;
                                 }
                             }
                         }
                         Err(err) => {
                             found_error = Some(err);
-                            self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                            self.insert_failure_ext(&txn, b.number(), &b.hash(), ext.clone())?;
                         }
                     }
                 } else {
-                    self.insert_failure_ext(&txn, &b.header().hash(), ext.clone())?;
+                    self.insert_failure_ext(&txn, b.number(), &b.hash(), ext.clone())?;
                 }
             } else {
                 txn.attach_block(b)?;
                 attach_block_cell(&txn, b)?;
                 mmr.push(b.digest())
                     .map_err(|e| InternalErrorKind::MMR.other(e))?;
-                self.insert_ok_ext(&txn, &b.header().hash(), ext.clone(), None, None)?;
+                self.insert_ok_ext(&txn, b.number(), &b.hash(), ext.clone(), None, None)?;
             }
         }
 
@@ -744,6 +765,7 @@ impl ConsumeUnverifiedBlockProcessor {
     fn insert_ok_ext(
         &self,
         txn: &StoreTransaction,
+        number: BlockNumber,
         hash: &Byte32,
         mut ext: BlockExt,
         cache_entries: Option<&[Completed]>,
@@ -759,17 +781,18 @@ impl ConsumeUnverifiedBlockProcessor {
             ext.cycles = Some(cycles);
         }
         ext.txs_sizes = txs_sizes;
-        txn.insert_block_ext(hash, &ext)
+        txn.insert_block_ext(number, hash, &ext)
     }
 
     fn insert_failure_ext(
         &self,
         txn: &StoreTransaction,
+        number: BlockNumber,
         hash: &Byte32,
         mut ext: BlockExt,
     ) -> Result<(), Error> {
         ext.verified = Some(false);
-        txn.insert_block_ext(hash, &ext)
+        txn.insert_block_ext(number, hash, &ext)
     }
 
     fn monitor_block_txs_verified(
@@ -890,6 +913,16 @@ impl ConsumeUnverifiedBlockProcessor {
         self.shared.store_snapshot(Arc::clone(&new_snapshot));
 
         Ok(())
+    }
+}
+
+fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
     }
 }
 

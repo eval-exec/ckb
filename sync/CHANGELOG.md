@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2](https://github.com/nervosnetwork/ckb/compare/ckb-sync-v1.3.1...ckb-sync-v1.3.2) - 2026-07-28
+
+### Changed
+
+- *(sync)* simplify header sync ETA log (#5280) (by @janx)
+
+### Fixed
+
+- Fix/unbounded memory growth (#5292) (by @chenyukang)
+- Fix clippy and format issues (#5263) (by @chenyukang)
+- Fix some public security issues (#5219) (by @Officeyutong)
+- reject duplicate indexes in GetBlockTransactions to prevent relay amplification (by @eval-exec)
+- *(relay)* fail fast on tx-pool backpressure (#5239) (by @chenyukang)
+
+### Contributors
+
+- @chenyukang
+- @janx
+- @Officeyutong
+- @eval-exec
+
+## [1.3.1](https://github.com/nervosnetwork/ckb/compare/ckb-sync-v1.3.0...ckb-sync-v1.3.1) - 2026-06-08
+
+### Added
+
+- add inserted valid header INFO level log (#5183) (by @eval-exec)
+
+### Changed
+
+- Merge commit from fork (by @zhangsoledad)
+- Merge commit from fork (by @eval-exec)
+- Merge commit from fork (by @Officeyutong)
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+- use is_multiple_of to replace % operator (#5189) (by @eval-exec)
+
+### Fixed
+
+- fix overflows (by @chenyukang)
+
+### Contributors
+
+- @chenyukang
+- @zhangsoledad
+- @eval-exec
+- @Officeyutong
+
 ## [1.3.0](https://github.com/nervosnetwork/ckb/compare/ckb-sync-v1.2.0...ckb-sync-v1.3.0) - 2026-03-02
 
 ### Added

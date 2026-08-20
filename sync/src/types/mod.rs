@@ -1130,6 +1130,13 @@ impl SyncShared {
         self.state
             .peers()
             .may_set_best_known_header(peer, header_view.as_header_index());
+        if header_view.number().is_multiple_of(10000) {
+            info!(
+                "inserted valid header: header {}-{}",
+                header_view.number(),
+                header_view.hash()
+            );
+        }
         self.state.may_set_shared_best_header(header_view);
     }
 
@@ -1377,7 +1384,28 @@ impl SyncState {
     }
 
     pub fn take_relay_tx_verify_results(&self, limit: usize) -> Vec<TxVerificationResult> {
-        self.tx_relay_receiver.try_iter().take(limit).collect()
+        let results = self.tx_relay_receiver.try_iter().take(limit).collect();
+        self.update_relay_tx_verify_result_queue_size();
+        results
+    }
+
+    pub(crate) fn trim_relay_tx_verify_results(&self, limit: usize) -> usize {
+        if self.tx_relay_receiver.len() <= limit {
+            return 0;
+        }
+        let excess = self.tx_relay_receiver.len().saturating_sub(limit);
+        let dropped = self.tx_relay_receiver.try_iter().take(excess).count();
+        self.update_relay_tx_verify_result_queue_size();
+        dropped
+    }
+
+    fn update_relay_tx_verify_result_queue_size(&self) {
+        if let Some(metrics) = ckb_metrics::handle() {
+            let queue_size = i64::try_from(self.tx_relay_receiver.len()).unwrap_or(i64::MAX);
+            metrics
+                .ckb_relay_tx_verify_result_queue_size
+                .set(queue_size);
+        }
     }
 
     pub fn shared_best_header(&self) -> HeaderIndexView {
@@ -1483,8 +1511,10 @@ impl SyncState {
             match unknown_tx_hashes.entry(tx_hash) {
                 keyed_priority_queue::Entry::Occupied(entry) => {
                     let mut priority = entry.get_priority().clone();
-                    priority.push_peer(peer_index);
-                    entry.set_priority(priority);
+                    if !priority.peers.contains(&peer_index) {
+                        priority.push_peer(peer_index);
+                        entry.set_priority(priority);
+                    }
                 }
                 keyed_priority_queue::Entry::Vacant(entry) => {
                     entry.set_priority(UnknownTxHashPriority {
@@ -1496,16 +1526,9 @@ impl SyncState {
             }
         }
 
-        // Check `unknown_tx_hashes`'s length after inserting the arrival `tx_hashes`
-        if unknown_tx_hashes.len() >= MAX_UNKNOWN_TX_HASHES_SIZE
-            || unknown_tx_hashes.len()
-                >= self.peers.state.len() * MAX_UNKNOWN_TX_HASHES_SIZE_PER_PEER
+        // Always enforce per-peer cap on total unknown tx hash registrations,
+        // regardless of the number of unique unknown hashes in the queue.
         {
-            warn!(
-                "unknown_tx_hashes is too long, len: {}",
-                unknown_tx_hashes.len()
-            );
-
             let mut peer_unknown_counter = 0;
             for (_hash, priority) in unknown_tx_hashes.iter() {
                 for peer in priority.peers.iter() {
@@ -1517,7 +1540,17 @@ impl SyncState {
             if peer_unknown_counter >= MAX_UNKNOWN_TX_HASHES_SIZE_PER_PEER {
                 return StatusCode::TooManyUnknownTransactions.into();
             }
+        }
 
+        // Check global unique-hash limit after inserting the arrival `tx_hashes`
+        if unknown_tx_hashes.len() >= MAX_UNKNOWN_TX_HASHES_SIZE
+            || unknown_tx_hashes.len()
+                >= self.peers.state.len() * MAX_UNKNOWN_TX_HASHES_SIZE_PER_PEER
+        {
+            warn!(
+                "unknown_tx_hashes is too long, len: {}",
+                unknown_tx_hashes.len()
+            );
             return Status::ignored();
         }
 
@@ -1901,11 +1934,12 @@ impl ActiveChain {
         hash_stop: &Byte32,
     ) -> Vec<core::HeaderView> {
         let tip_number = self.tip_header().number();
-        let max_height = cmp::min(
-            block_number + 1 + MAX_HEADERS_LEN as BlockNumber,
-            tip_number + 1,
-        );
-        (block_number + 1..max_height)
+        let Some(start_number) = block_number.checked_add(1) else {
+            return Vec::new();
+        };
+        std::iter::successors(Some(start_number), |number| number.checked_add(1))
+            .take_while(|number| *number <= tip_number)
+            .take(MAX_HEADERS_LEN)
             .filter_map(|block_number| self.snapshot.get_block_hash(block_number))
             .take_while(|block_hash| block_hash != hash_stop)
             .filter_map(|block_hash| self.sync_shared.store().get_block_header(&block_hash))

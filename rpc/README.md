@@ -1156,7 +1156,8 @@ Response
         "type": null
       }
     },
-    "status": "live"
+    "status": "live",
+    "block_hash": "0x7978ec7ce5b507cfb52e149e36b1a23f6062ed150503c85bbf825da3599095ed"
   }
 }
 ```
@@ -6039,14 +6040,16 @@ The JSON view of a cell with its status information.
       "type": null
     }
   },
-  "status": "live"
+  "status": "live",
+  "block_hash": "0x7978ec7ce5b507cfb52e149e36b1a23f6062ed150503c85bbf825da3599095ed"
 }
 ```
 
 ```
 {
   "cell": null,
-  "status": "unknown"
+  "status": "unknown",
+  "block_hash": null
 }
 ```
 
@@ -6683,7 +6686,7 @@ IndexerPagination wraps objects array and last_cursor to provide paging
 
 ### Type `IndexerRange`
 
-A array represent (half-open) range bounded inclusively below and exclusively above [start, end).
+An array representing (half-open) range bounded inclusively below and exclusively above [start, end).
 
 ###### Examples
 

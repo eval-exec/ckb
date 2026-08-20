@@ -34,7 +34,7 @@ use ckb_types::{
     prelude::*,
 };
 use http_body_util::Full;
-use hyper::{Method, Request};
+use hyper::{Method, Request, header::HeaderValue};
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use std::collections::HashSet;
 use std::sync::{
@@ -110,14 +110,17 @@ pub struct BlockAssembler {
 
 impl BlockAssembler {
     /// Construct new block generator
-    pub fn new(config: BlockAssemblerConfig, snapshot: Arc<Snapshot>) -> Self {
+    pub fn new(
+        config: BlockAssemblerConfig,
+        snapshot: Arc<Snapshot>,
+    ) -> Result<Self, BlockAssemblerError> {
         let consensus = snapshot.consensus();
         let tip_header = snapshot.tip_header();
         let current_epoch = consensus
             .next_epoch_ext(tip_header, &snapshot.borrow_as_data_loader())
             .expect("tip header's epoch should be stored")
             .epoch();
-        let mut builder = BlockTemplateBuilder::new(&snapshot, &current_epoch);
+        let mut builder = BlockTemplateBuilder::new(&snapshot, &current_epoch)?;
 
         let cellbase = Self::build_cellbase(&config, &snapshot)
             .expect("build cellbase for BlockAssembler initial");
@@ -138,7 +141,13 @@ impl BlockAssembler {
             .proposals(vec![])
             .cellbase(cellbase)
             .work_id(work_id.fetch_add(1, Ordering::SeqCst))
-            .current_time(cmp::max(unix_time_as_millis(), tip_header.timestamp() + 1))
+            .current_time(cmp::max(
+                unix_time_as_millis(),
+                tip_header
+                    .timestamp()
+                    .checked_add(1)
+                    .ok_or(BlockAssemblerError::Overflow)?,
+            ))
             .dao(dao);
         if let Some(data) = extension {
             builder.extension(data);
@@ -158,7 +167,7 @@ impl BlockAssembler {
             epoch: current_epoch,
         };
 
-        Self {
+        Ok(Self {
             config: Arc::new(config),
             work_id: Arc::new(work_id),
             candidate_uncles: Arc::new(Mutex::new(CandidateUncles::new())),
@@ -167,7 +176,7 @@ impl BlockAssembler {
                 Client::builder(hyper_util::rt::TokioExecutor::new())
                     .build::<_, Full<bytes::Bytes>>(HttpConnector::new()),
             ),
-        }
+        })
     }
 
     pub(crate) async fn update_full(&self, tx_pool: &RwLock<TxPool>) -> Result<(), AnyError> {
@@ -226,8 +235,10 @@ impl BlockAssembler {
             }
         }
 
-        let txs_size = checked_txs.iter().map(|tx| tx.size).sum();
-        let total_size = basic_size + txs_size;
+        let txs_size = Self::checked_entries_size(&checked_txs)?;
+        let total_size = basic_size
+            .checked_add(txs_size)
+            .ok_or(BlockAssemblerError::Overflow)?;
 
         let mut builder = BlockTemplateBuilder::from_template(&current.template);
         builder
@@ -263,7 +274,7 @@ impl BlockAssembler {
             .next_epoch_ext(tip_header, &snapshot.borrow_as_data_loader())
             .expect("tip header's epoch should be stored")
             .epoch();
-        let mut builder = BlockTemplateBuilder::new(&snapshot, &current_epoch);
+        let mut builder = BlockTemplateBuilder::new(&snapshot, &current_epoch)?;
 
         let cellbase = Self::build_cellbase(&self.config, &snapshot)?;
         let uncles = self.prepare_uncles(&snapshot, &current_epoch).await;
@@ -282,7 +293,13 @@ impl BlockAssembler {
             .cellbase(cellbase)
             .uncles(uncles)
             .work_id(self.work_id.fetch_add(1, Ordering::SeqCst))
-            .current_time(cmp::max(unix_time_as_millis(), tip_header.timestamp() + 1))
+            .current_time(cmp::max(
+                unix_time_as_millis(),
+                tip_header
+                    .timestamp()
+                    .checked_add(1)
+                    .ok_or(BlockAssemblerError::Overflow)?,
+            ))
             .dao(dao);
         if let Some(data) = extension {
             builder.extension(data);
@@ -435,7 +452,7 @@ impl BlockAssembler {
             current_template.cellbase.clone(),
             txs,
         ) {
-            let new_txs_size = checked_txs.iter().map(|tx| tx.size).sum();
+            let new_txs_size = Self::checked_entries_size(&checked_txs)?;
             let new_total_size = current.size.calc_total_by_txs(new_txs_size);
             let mut builder = BlockTemplateBuilder::from_template(&current.template);
             builder
@@ -510,7 +527,10 @@ impl BlockAssembler {
         snapshot: &Snapshot,
     ) -> Result<TransactionView, AnyError> {
         let tip = snapshot.tip_header();
-        let candidate_number = tip.number() + 1;
+        let candidate_number = tip
+            .number()
+            .checked_add(1)
+            .ok_or(BlockAssemblerError::Overflow)?;
         let cellbase_witness = Self::build_cellbase_witness(config, snapshot);
 
         let tx = {
@@ -598,6 +618,13 @@ impl BlockAssembler {
         block.serialized_size_without_uncle_proposals()
     }
 
+    fn checked_entries_size(entries: &[TxEntry]) -> Result<usize, BlockAssemblerError> {
+        entries.iter().try_fold(0usize, |sum, tx| {
+            sum.checked_add(tx.size)
+                .ok_or(BlockAssemblerError::Overflow)
+        })
+    }
+
     fn calc_dao(
         snapshot: &Snapshot,
         current_epoch: &EpochExt,
@@ -661,12 +688,24 @@ impl BlockAssembler {
         if let Ok(template_json) = serde_json::to_string(&template) {
             let notify_timeout = Duration::from_millis(self.config.notify_timeout_millis);
             for url in &self.config.notify {
-                if let Ok(req) = Request::builder()
+                let mut req_builder = Request::builder()
                     .method(Method::POST)
                     .uri(url.as_ref())
-                    .header("content-type", "application/json")
-                    .body(Full::new(template_json.to_owned().into()))
-                {
+                    .header("content-type", "application/json");
+
+                if let Some(token) = &self.config.notify_auth_token {
+                    let mut auth_value = match HeaderValue::from_str(&format!("Bearer {token}")) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("invalid block_assembler.notify_auth_token: {err}");
+                            continue;
+                        }
+                    };
+                    auth_value.set_sensitive(true);
+                    req_builder = req_builder.header(hyper::header::AUTHORIZATION, auth_value);
+                }
+
+                if let Ok(req) = req_builder.body(Full::new(template_json.to_owned().into())) {
                     let client = Arc::clone(&self.poster);
                     let url = url.to_owned();
                     tokio::spawn(async move {
@@ -790,18 +829,24 @@ pub(crate) struct BlockTemplateBuilder {
 }
 
 impl BlockTemplateBuilder {
-    pub(crate) fn new(snapshot: &Snapshot, current_epoch: &EpochExt) -> Self {
+    pub(crate) fn new(
+        snapshot: &Snapshot,
+        current_epoch: &EpochExt,
+    ) -> Result<Self, BlockAssemblerError> {
         let consensus = snapshot.consensus();
         let tip_header = snapshot.tip_header();
         let tip_hash = tip_header.hash();
-        let candidate_number = tip_header.number() + 1;
+        let candidate_number = tip_header
+            .number()
+            .checked_add(1)
+            .ok_or(BlockAssemblerError::Overflow)?;
 
         let version = consensus.block_version();
         let max_block_bytes = consensus.max_block_bytes();
         let cycles_limit = consensus.max_block_cycles();
         let uncles_count_limit = consensus.max_uncles_num() as u8;
 
-        Self {
+        Ok(Self {
             version,
             compact_target: current_epoch.compact_target(),
 
@@ -820,7 +865,7 @@ impl BlockTemplateBuilder {
             dao: None,
             current_time: None,
             extension: None,
-        }
+        })
     }
 
     pub(crate) fn from_template(template: &BlockTemplate) -> Self {

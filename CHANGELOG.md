@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.209.0](https://github.com/nervosnetwork/ckb/compare/v0.207.0...v0.209.0) - 2026-07-14
+
+### Changed
+
+- sign key need key passphrase
+- bump to v0.208.0-rc0
+- Update CKB release signing key
+- Upgrade tentacle dependencies (#5277)
+- *(deps)* update crossbeam-epoch for RustSec advisory (#5276)
+- *(deps)* bump openssl from 0.10.77 to 0.10.81 (#5244)
+
+### Fixed
+
+- Fix Windows release CRT dependency (#5274)
+- Ensure integration test required checks fail on chunk failures (#5241) (by @Officeyutong)
+
+### Contributors
+
+- @Officeyutong
+
+## [0.207.0](https://github.com/nervosnetwork/ckb/compare/v0.206.0...v0.207.0) - 2026-06-10
+
+### Changed
+
+- split mainnet/testnet params in devnet-from-existing-data (#5205) (by @sunchengzhu)
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Fixed
+
+- fix overflows (by @chenyukang)
+
+### Security
+
+- Update cargo deny workflow to conditionally run security audit (#5229) (by @chenyukang)
+
+### Contributors
+
+- @chenyukang
+- @sunchengzhu
+- @eval-exec
+
+## [0.206.0](https://github.com/nervosnetwork/ckb/compare/v0.205.0...v0.206.0) - 2026-05-06
+
+### Added
+
+- add guide for running dev chain from existing data (#5125) (by @eval-exec)
+
+### Changed
+
+- bump rustls-webpki to 0.103.13 (#5186) (by @eval-exec)
+- update testnet bootnodes (#5176) (by @jiangxianliang007)
+- *(release)* reset version before changelog generation in bump.sh (#5131) (by @doitian)
+- update platform-support.md to reflect latest CI and build settings (#5142) (by @Copilot)
+- upgrade deps (#5132) (by @driftluo)
+
+### Fixed
+
+- preserve leading zero bytes and handle all-0xFF overflow in rich-indexer prefix search upper bound (#5166) (by @Copilot)
+- *(deps)* fix `make security-audit`: update keccak to 0.1.6 (#5158) (by @eval-exec)
+
+### Security
+
+- bump rustls-webpki to 0.103.12 (#5182) (by @eval-exec)
+- *(deps)* bump thin-vec from 0.2.14 to 0.2.16 (#5170) (by @dependabot[bot])
+- *(deps)* bump rustls-webpki from 0.103.7 to 0.103.10 (#5154) (by @dependabot[bot])
+
+### Contributors
+
+- @eval-exec
+- @jiangxianliang007
+- @doitian
+- @driftluo
+
 ## [0.205.0](https://github.com/nervosnetwork/ckb/compare/v0.204.0...v0.205.0) - 2026-03-17
 
 ### Added
