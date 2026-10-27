@@ -18,6 +18,7 @@ use crate::{
         hole_punching::{
             ADDRS_COUNT_LIMIT, HolePunching, MAX_HOPS,
             component::{forward_delivered, init_sync, try_nat_traversal},
+            elapsed_millis,
             status::{Status, StatusCode},
         },
     },
@@ -131,11 +132,9 @@ impl<'a> ConnectionRequestDeliveredProcess<'a> {
             return StatusCode::InvalidRoute.with_context("the route length is too long");
         }
 
-        if self
+        if !self
             .protocol
-            .forward_rate_limiter
-            .check_key(&(content.from.clone(), content.to.clone(), self.msg_item_id))
-            .is_err()
+            .check_forward_rate_limit(&content.from, &content.to, self.msg_item_id)
         {
             debug!(
                 "from: {}, to {}, item_name: {}, rate limit is reached",
@@ -166,7 +165,7 @@ impl<'a> ConnectionRequestDeliveredProcess<'a> {
                                 return res;
                             }
                             let now = unix_time_as_millis();
-                            let ttl = now - start;
+                            let ttl = elapsed_millis(now, start);
 
                             self.try_nat_traversal(ttl, content.listen_addrs);
 
@@ -252,7 +251,8 @@ impl<'a> ConnectionRequestDeliveredProcess<'a> {
                 | TransportType::Onion
                 | TransportType::Ws
                 | TransportType::Wss
-                | TransportType::Tls => None,
+                | TransportType::Tls
+                | TransportType::QuicV1 => None,
             })
             .collect::<Vec<_>>();
 

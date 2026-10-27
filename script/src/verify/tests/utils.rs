@@ -1,8 +1,7 @@
 use ckb_chain_spec::consensus::ConsensusBuilder;
 use ckb_chain_spec::consensus::TWO_IN_TWO_OUT_BYTES;
 use ckb_crypto::secp::{Generator, Privkey, Pubkey, Signature};
-use ckb_db::RocksDB;
-use ckb_db_schema::COLUMNS;
+use ckb_db::{RocksDB, Schema};
 use ckb_hash::{blake2b_256, new_blake2b};
 use ckb_store::{
     ChainDB,
@@ -161,7 +160,7 @@ pub(crate) struct TransactionScriptsVerifierWithEnv {
 impl TransactionScriptsVerifierWithEnv {
     pub(crate) fn new() -> Self {
         let tmp_dir = TempDir::new().unwrap();
-        let db = RocksDB::open_in(&tmp_dir, COLUMNS);
+        let db = RocksDB::open_in(&tmp_dir, Schema::V1);
         let store = Arc::new(ChainDB::new(db, Default::default()));
         let version_1_enabled_at = 5;
         let version_2_enabled_at = 10;
@@ -276,44 +275,6 @@ impl TransactionScriptsVerifierWithEnv {
         self.verify_map(version, rtx, |verifier| {
             self.set_skip_pause(true);
             verifier.verify(max_cycles)
-        })
-    }
-
-    pub(crate) fn verify_until_completed(
-        &self,
-        version: ScriptVersion,
-        rtx: &ResolvedTransaction,
-    ) -> Result<(Cycle, usize), Error> {
-        let max_cycles = Cycle::MAX;
-        self.verify_map(version, rtx, |verifier| {
-            let cycles;
-            let mut times = 0usize;
-            times += 1;
-
-            let mut init_snap = match verifier.resumable_verify(max_cycles).unwrap() {
-                VerifyResult::Suspended(state) => Some(state),
-                VerifyResult::Completed(cycle) => {
-                    cycles = cycle;
-                    return Ok((cycles, times));
-                }
-            };
-
-            loop {
-                times += 1;
-                let snap = init_snap.take().unwrap();
-                match verifier.resume_from_state(&snap, max_cycles) {
-                    Ok(VerifyResult::Suspended(state)) => {
-                        init_snap = Some(state);
-                    }
-                    Ok(VerifyResult::Completed(cycle)) => {
-                        cycles = cycle;
-                        break;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-
-            Ok((cycles, times))
         })
     }
 

@@ -5,11 +5,11 @@ mod error;
 
 use ckb_error::AnyError;
 use ckb_jsonrpc_types::{
-    Alert, BannedAddr, Block, BlockEconomicState, BlockFilter, BlockNumber, BlockTemplate,
-    BlockView, Capacity, CellWithStatus, ChainInfo, EpochNumber, EpochView, EstimateCycles,
-    HeaderView, LocalNode, OutPoint, PoolTxDetailInfo, RawTxPool, RemoteNode, SyncState, Timestamp,
-    Transaction, TransactionProof, TransactionWithStatusResponse, TxPoolInfo, Uint32, Uint64,
-    Version,
+    BannedAddr, Block, BlockEconomicState, BlockFilter, BlockNumber, BlockTemplate, BlockView,
+    Capacity, CellWithStatus, ChainInfo, EpochNumber, EpochView, EstimateCycles, HeaderView,
+    LocalNode, OutPoint, PoolTxDetailInfo, RawTxPool, RemoteNode, SyncState, Timestamp,
+    Transaction, TransactionAndWitnessProof, TransactionProof, TransactionWithStatusResponse,
+    TxPoolInfo, Uint32, Uint64, Version,
 };
 use ckb_types::core::{
     BlockNumber as CoreBlockNumber, Capacity as CoreCapacity, EpochNumber as CoreEpochNumber,
@@ -257,10 +257,6 @@ impl RpcClient {
             .expect("rpc call estimate_cycles")
     }
 
-    pub fn send_alert(&self, alert: Alert) {
-        self.inner.send_alert(alert).expect("rpc call send_alert")
-    }
-
     pub fn tx_pool_info(&self) -> TxPoolInfo {
         self.inner.tx_pool_info().expect("rpc call tx_pool_info")
     }
@@ -380,8 +376,6 @@ jsonrpc!(
     pub fn tx_pool_info(&self) -> TxPoolInfo;
     pub fn get_raw_tx_pool(&self, verbose: Option<bool>) -> RawTxPool;
 
-    pub fn send_alert(&self, alert: Alert) -> ();
-
     pub fn add_node(&self, peer_id: String, address: String) -> ();
     pub fn remove_node(&self, peer_id: String) -> ();
     pub fn process_block_without_verify(&self, _data: Block, broadcast: bool) -> Option<H256>;
@@ -393,6 +387,8 @@ jsonrpc!(
     pub fn get_block_economic_state(&self, _hash: H256) -> Option<BlockEconomicState>;
     pub fn get_transaction_proof(&self, tx_hashes: Vec<H256>, block_hash: Option<H256>) -> TransactionProof;
     pub fn verify_transaction_proof(&self, tx_proof: TransactionProof) -> Vec<H256>;
+    pub fn get_transaction_and_witness_proof(&self, tx_hashes: Vec<H256>, block_hash: Option<H256>) -> TransactionAndWitnessProof;
+    pub fn verify_transaction_and_witness_proof(&self, tx_proof: TransactionAndWitnessProof) -> Vec<H256>;
     pub fn notify_transaction(&self, tx: Transaction) -> H256;
     pub fn tx_pool_ready(&self) -> bool;
     pub fn get_pool_tx_detail_info(&self, _hash: H256) -> PoolTxDetailInfo;

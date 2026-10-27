@@ -139,6 +139,13 @@ impl PoolMap {
         self.entries.get_by_id(id)
     }
 
+    /// Returns the pool entry for a transaction hash.
+    pub(crate) fn get_by_tx_hash(&self, tx_hash: &Byte32) -> Option<&PoolEntry> {
+        let id = ProposalShortId::from_tx_hash(tx_hash);
+        self.get_by_id(&id)
+            .filter(|entry| &entry.inner.transaction().hash() == tx_hash)
+    }
+
     fn get_by_id_checked(&self, id: &ProposalShortId) -> &PoolEntry {
         self.get_by_id(id).expect("inconsistent pool")
     }
@@ -181,8 +188,9 @@ impl PoolMap {
     }
 
     pub(crate) fn get_output_with_data(&self, out_point: &OutPoint) -> Option<(CellOutput, Bytes)> {
-        self.get(&ProposalShortId::from_tx_hash(&out_point.tx_hash()))
-            .and_then(|entry| {
+        self.get_by_tx_hash(&out_point.tx_hash())
+            .and_then(|pool_entry| {
+                let entry = &pool_entry.inner;
                 entry
                     .transaction()
                     .output_with_data(out_point.index().into())
@@ -207,13 +215,16 @@ impl PoolMap {
         if self.entries.get_by_id(&tx_short_id).is_some() {
             return Ok((false, evicts));
         }
+        let (total_tx_size, total_tx_cycles) =
+            self.updated_stat_for_add_tx(entry.size, entry.cycles)?;
         trace!("pool_map.add_{:?} {}", status, entry.transaction().hash());
         evicts = self.check_and_record_ancestors(&mut entry)?;
         self.record_entry_edges(&entry)?;
         self.insert_entry(&entry, status);
         self.record_entry_descendants(&entry);
         self.track_entry_statics(None, Some(status));
-        self.update_stat_for_add_tx(entry.size, entry.cycles);
+        self.total_tx_size = total_tx_size;
+        self.total_tx_cycles = total_tx_cycles;
         Ok((true, evicts))
     }
 
@@ -259,6 +270,21 @@ impl PoolMap {
             .iter()
             .filter_map(|id| self.remove_entry(id))
             .collect()
+    }
+
+    pub(crate) fn remove_entry_and_descendants_by_tx_hash(
+        &mut self,
+        tx_hash: &Byte32,
+    ) -> Vec<TxEntry> {
+        let Some(id) = self.get_by_tx_hash(tx_hash).map(|entry| entry.id.clone()) else {
+            return Vec::new();
+        };
+        self.remove_entry_and_descendants(&id)
+    }
+
+    pub(crate) fn remove_entry_by_tx_hash(&mut self, tx_hash: &Byte32) -> Option<TxEntry> {
+        let id = self.get_by_tx_hash(tx_hash).map(|entry| entry.id.clone())?;
+        self.remove_entry(&id)
     }
 
     pub(crate) fn resolve_conflict_header_dep(
@@ -530,16 +556,14 @@ impl PoolMap {
                 parents.extend(deps.iter().cloned());
             }
 
-            let id = ProposalShortId::from_tx_hash(&input_pt.tx_hash());
-            if self.links.inner.contains_key(&id) {
-                parents.insert(id);
+            if let Some(parent) = self.get_by_tx_hash(&input_pt.tx_hash()) {
+                parents.insert(parent.id.clone());
             }
         }
         for cell_dep in entry.cell_deps() {
             let dep_pt = cell_dep.out_point();
-            let id = ProposalShortId::from_tx_hash(&dep_pt.tx_hash());
-            if self.links.inner.contains_key(&id) {
-                parents.insert(id);
+            if let Some(parent) = self.get_by_tx_hash(&dep_pt.tx_hash()) {
+                parents.insert(parent.id.clone());
             }
         }
 
@@ -597,31 +621,37 @@ impl PoolMap {
             return Ok(evicted);
         }
 
-        if ancestors_count.saturating_sub(cell_ref_parents.len()) <= self.max_ancestors_count {
-            // if ancestors count exceed limitation,
-            // try to evict some conflicted transactions due to ref cells
-
-            // sort them to find out the transactions with lowest fees
-            let evict_candidates: Vec<ProposalShortId> = self
-                .entries
-                .iter_by_evict_key()
-                .filter(move |entry| cell_ref_parents.contains(&entry.id))
-                .map(|x| x.id.clone())
-                .collect();
-
-            let mut iter = evict_candidates.iter();
-            while ancestors_count > self.max_ancestors_count {
-                if let Some(next_id) = iter.next() {
-                    let removed = self.remove_entry_and_descendants(next_id);
-                    ancestors_count = ancestors_count.saturating_sub(1);
-                    parents.remove(next_id);
-                    evicted.extend(removed);
-                } else {
-                    break;
-                }
-            }
-        } else {
+        if ancestors_count.saturating_sub(cell_ref_parents.len()) > self.max_ancestors_count {
             return Err(Reject::ExceededMaximumAncestorsCount);
+        }
+
+        // if ancestors count exceed limitation,
+        // try to evict some conflicted transactions due to ref cells
+
+        // sort them to find out the transactions with lowest fees
+        let evict_candidates: Vec<ProposalShortId> = self
+            .entries
+            .iter_by_evict_key()
+            .filter(move |entry| cell_ref_parents.contains(&entry.id))
+            .map(|x| x.id.clone())
+            .collect();
+
+        let mut iter = evict_candidates.iter();
+        while ancestors_count > self.max_ancestors_count {
+            let Some(next_id) = iter.next() else {
+                break;
+            };
+
+            let removed = self.remove_entry_and_descendants(next_id);
+            for removed_id in removed.iter().map(|entry| entry.proposal_short_id()) {
+                parents.remove(&removed_id);
+            }
+            ancestors_count = self
+                .links
+                .calc_relation_ids(parents.clone(), Relation::Parents)
+                .len()
+                + 1;
+            evicted.extend(removed);
         }
 
         // some txs in `parents` are removed, now `ancestors` need to re-caculate,
@@ -692,44 +722,65 @@ impl PoolMap {
         }
     }
 
-    /// Update size and cycles statistics for add tx
-    fn update_stat_for_add_tx(&mut self, tx_size: usize, cycles: Cycle) {
-        let total_tx_size = self.total_tx_size.checked_add(tx_size).unwrap_or_else(|| {
-            error!(
-                "total_tx_size {} overflown by add {}",
+    fn recompute_total_stat(&self) -> Option<(usize, Cycle)> {
+        self.entries.iter().try_fold(
+            (0usize, 0 as Cycle),
+            |(total_size, total_cycles), (_, entry)| {
+                Some((
+                    total_size.checked_add(entry.inner.size)?,
+                    total_cycles.checked_add(entry.inner.cycles)?,
+                ))
+            },
+        )
+    }
+
+    /// Calculate size and cycles statistics for adding a tx.
+    fn updated_stat_for_add_tx(
+        &self,
+        tx_size: usize,
+        cycles: Cycle,
+    ) -> Result<(usize, Cycle), Reject> {
+        let total_tx_size = self.total_tx_size.checked_add(tx_size).ok_or_else(|| {
+            Reject::Full(format!(
+                "tx-pool total_tx_size {} overflows by add {}",
                 self.total_tx_size, tx_size
-            );
-            self.total_tx_size
-        });
-        let total_tx_cycles = self.total_tx_cycles.checked_add(cycles).unwrap_or_else(|| {
-            error!(
-                "total_tx_cycles {} overflown by add {}",
+            ))
+        })?;
+        let total_tx_cycles = self.total_tx_cycles.checked_add(cycles).ok_or_else(|| {
+            Reject::Full(format!(
+                "tx-pool total_tx_cycles {} overflows by add {}",
                 self.total_tx_cycles, cycles
-            );
-            self.total_tx_cycles
-        });
-        self.total_tx_size = total_tx_size;
-        self.total_tx_cycles = total_tx_cycles;
+            ))
+        })?;
+        Ok((total_tx_size, total_tx_cycles))
     }
 
     /// Update size and cycles statistics for remove tx
     /// cycles overflow is possible, currently obtaining cycles is not accurate
     fn update_stat_for_remove_tx(&mut self, tx_size: usize, cycles: Cycle) {
-        let total_tx_size = self.total_tx_size.checked_sub(tx_size).unwrap_or_else(|| {
-            error!(
-                "total_tx_size {} overflown by sub {}",
-                self.total_tx_size, tx_size
-            );
-            0
-        });
-        let total_tx_cycles = self.total_tx_cycles.checked_sub(cycles).unwrap_or_else(|| {
-            error!(
-                "total_tx_cycles {} overflown by sub {}",
-                self.total_tx_cycles, cycles
-            );
-            0
-        });
-        self.total_tx_size = total_tx_size;
-        self.total_tx_cycles = total_tx_cycles;
+        match (
+            self.total_tx_size.checked_sub(tx_size),
+            self.total_tx_cycles.checked_sub(cycles),
+        ) {
+            (Some(total_tx_size), Some(total_tx_cycles)) => {
+                self.total_tx_size = total_tx_size;
+                self.total_tx_cycles = total_tx_cycles;
+            }
+            _ => {
+                if let Some((total_tx_size, total_tx_cycles)) = self.recompute_total_stat() {
+                    error!(
+                        "tx-pool total stats underflowed when removing size {} cycles {}, recomputed size {} cycles {}",
+                        tx_size, cycles, total_tx_size, total_tx_cycles
+                    );
+                    self.total_tx_size = total_tx_size;
+                    self.total_tx_cycles = total_tx_cycles;
+                } else {
+                    error!(
+                        "tx-pool total stats underflowed when removing size {} cycles {}, and recomputing overflowed",
+                        tx_size, cycles
+                    );
+                }
+            }
+        }
     }
 }

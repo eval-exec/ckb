@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4](https://github.com/nervosnetwork/ckb/compare/ckb-network-v1.2.3...ckb-network-v1.2.4) - 2026-09-28
+
+### Changed
+
+- redact proxy credentials in startup logs (#5301) (by @chenyukang)
+
+### Fixed
+
+- prevent timestamp underflow in hole punching (#5324) (by @Officeyutong)
+
+### Removed
+
+- remove network alert module (#5304) (by @chenyukang)
+
+### Contributors
+
+- @chenyukang
+- @Officeyutong
+
+## [1.2.3](https://github.com/nervosnetwork/ckb/compare/ckb-network-v1.2.2...ckb-network-v1.2.3) - 2026-07-28
+
+### Changed
+
+- Upgrade tentacle dependencies (#5277) (by @eval-exec)
+
+### Fixed
+
+- cap total addresses per discovery Nodes message (by @eval-exec)
+- Fix some public security issues (#5219) (by @Officeyutong)
+- *(network)* bound hole punching forward limiter keys (#5221) (by @chenyukang)
+
+### Contributors
+
+- @eval-exec
+- @Officeyutong
+- @chenyukang
+
+## [1.2.2](https://github.com/nervosnetwork/ckb/compare/ckb-network-v1.2.1...ckb-network-v1.2.2) - 2026-06-08
+
+### Changed
+
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Contributors
+
+- @eval-exec
+
+## [1.2.1](https://github.com/nervosnetwork/ckb/compare/ckb-network-v1.2.0...ckb-network-v1.2.1) - 2026-04-24
+
+### Changed
+
+- upgrade deps (#5132) (by @driftluo)
+
+### Contributors
+
+- @driftluo
+
 ## [1.2.0](https://github.com/nervosnetwork/ckb/compare/ckb-network-v1.1.1...ckb-network-v1.2.0) - 2026-03-02
 
 ### Added

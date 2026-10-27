@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2](https://github.com/nervosnetwork/ckb/compare/ckb-store-v1.1.1...ckb-store-v1.1.2) - 2026-09-28
+
+### Changed
+
+- *(deps)* bump the all-dependencies group across 1 directory with 1 update (by @eval-exec)
+
+### Contributors
+
+- @eval-exec
+
+## [1.1.1](https://github.com/nervosnetwork/ckb/compare/ckb-store-v1.1.0...ckb-store-v1.1.1) - 2026-06-08
+
+### Changed
+
+- validate freezer hash lookups (#5222) (by @chenyukang)
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Contributors
+
+- @chenyukang
+- @eval-exec
+
 ## [1.1.0](https://github.com/nervosnetwork/ckb/compare/ckb-store-v1.0.2...ckb-store-v1.1.0) - 2026-03-02
 
 ### Added

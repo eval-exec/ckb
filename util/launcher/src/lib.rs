@@ -19,7 +19,6 @@ use ckb_network::{
     CKBProtocol, Flags, NetworkController, NetworkService, NetworkState, SupportProtocols,
     network::TransportType, observe_listen_port_occupancy,
 };
-use ckb_network_alert::alert_relayer::AlertRelayer;
 use ckb_onion::OnionServiceConfig;
 use ckb_resource::Resource;
 use ckb_rpc::{RpcServer, ServiceBuilder};
@@ -65,6 +64,17 @@ impl Launcher {
         let block_assembler_config = if let Some(mut block_assembler) =
             self.args.config.block_assembler.clone()
         {
+            if block_assembler
+                .notify_auth_token
+                .as_deref()
+                .is_some_and(|token| token.trim().is_empty() || token.trim() != token)
+            {
+                eprintln!(
+                    "block_assembler.notify_auth_token must be non-empty and contain no leading or trailing whitespace"
+                );
+                return Err(ExitCode::Config);
+            }
+
             let check_lock_code_hash = |code_hash| -> Result<bool, ExitCode> {
                 let secp_cell_data =
                     Resource::bundled("specs/cells/secp256k1_blake160_sighash_all".to_string())
@@ -475,23 +485,6 @@ impl Launcher {
             flags.remove(Flags::LIGHT_CLIENT);
         }
 
-        let alert_signature_config = self.args.config.alert_signature.clone().unwrap_or_default();
-        let alert_relayer = AlertRelayer::new(
-            self.version.short(),
-            shared.notify_controller().clone(),
-            alert_signature_config,
-        );
-
-        let alert_notifier = Arc::clone(alert_relayer.notifier());
-        let alert_verifier = Arc::clone(alert_relayer.verifier());
-        if support_protocols.contains(&SupportProtocol::Alert) {
-            protocols.push(CKBProtocol::new_with_support_protocol(
-                SupportProtocols::Alert,
-                Box::new(alert_relayer),
-                Arc::clone(&network_state),
-            ));
-        }
-
         let required_protocol_ids = vec![SupportProtocols::Sync.protocol_id()];
 
         let network_controller = NetworkService::new(
@@ -535,7 +528,7 @@ impl Launcher {
                 sync_shared,
                 Arc::new(chain_controller.clone()),
             )
-            .enable_stats(shared.clone(), Arc::clone(&alert_notifier))
+            .enable_stats(shared.clone())
             .enable_experiment(shared.clone())
             .enable_integration_test(
                 shared.clone(),
@@ -551,12 +544,6 @@ impl Launcher {
                     .iter()
                     .map(|script| script.clone().into())
                     .collect(),
-            )
-            .enable_alert(
-                alert_verifier,
-                alert_notifier,
-                network_controller.clone(),
-                shared.clone(),
             )
             .enable_terminal(shared.clone(), network_controller.clone())
             .enable_indexer(

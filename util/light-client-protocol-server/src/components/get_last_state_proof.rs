@@ -198,7 +198,11 @@ impl<'a> GetLastStateProofProcess<'a> {
     pub(crate) async fn execute(self) -> Status {
         let last_n_blocks: u64 = self.message.last_n_blocks().into();
 
-        if self.message.difficulties().len() + (last_n_blocks as usize) * 2
+        if self
+            .message
+            .difficulties()
+            .len()
+            .saturating_add((last_n_blocks as usize).saturating_mul(2))
             > constant::GET_LAST_STATE_PROOF_LIMIT
         {
             return StatusCode::MalformedProtocolMessage.with_context("too many samples");
@@ -228,6 +232,11 @@ impl<'a> GetLastStateProofProcess<'a> {
             .collect::<Vec<_>>();
 
         let last_block_number = last_block.number();
+        if start_block_number > last_block_number {
+            return StatusCode::InvalidRequest.with_context(format!(
+                "the start block number ({start_block_number}) should not be greater than the last block number ({last_block_number})"
+            ));
+        }
 
         let reorg_last_n_numbers = if start_block_number == 0
             || snapshot
@@ -310,6 +319,12 @@ impl<'a> GetLastStateProofProcess<'a> {
                 difficulty_boundary_block_number = last_block_number - last_n_blocks;
             }
 
+            let min_boundary = last_block_number
+                .saturating_sub(constant::GET_LAST_STATE_PROOF_LIMIT as BlockNumber);
+            if difficulty_boundary_block_number < min_boundary {
+                difficulty_boundary_block_number = min_boundary;
+            }
+
             let last_n_numbers =
                 (difficulty_boundary_block_number..last_block_number).collect::<Vec<_>>();
 
@@ -347,6 +362,10 @@ impl<'a> GetLastStateProofProcess<'a> {
             .chain(sampled_numbers)
             .chain(last_n_numbers)
             .collect::<Vec<_>>();
+
+        if block_numbers.len() > constant::GET_LAST_STATE_PROOF_LIMIT {
+            return StatusCode::MalformedProtocolMessage.with_context("too many samples");
+        }
 
         let (positions, headers) = {
             let mut positions: Vec<u64> = Vec::new();

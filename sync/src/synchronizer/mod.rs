@@ -154,7 +154,7 @@ impl BlockFetchCMD {
                     info!(
                         "best known header {}-{}, \
                                  CKB is syncing to latest Header to find the assume valid target: {}. \
-                                 Please wait. {}",
+                                 {}",
                         number,
                         best_known.hash(),
                         assume_valid_target,
@@ -170,18 +170,13 @@ impl BlockFetchCMD {
             Some(remaining) => {
                 let secs = remaining.as_secs();
                 match secs {
-                    0 => "Almost synced.".to_string(),
-                    1..=59 => format!("Need {} seconds to sync to the latest Header.", secs),
-                    60..=3599 => {
-                        format!("Need {} minutes to sync to the latest Header.", secs / 60)
-                    }
+                    0 => "ETA: almost synced.".to_string(),
+                    1..=59 => format!("ETA: {} seconds.", secs),
+                    60..=3599 => format!("ETA: {} minutes.", secs / 60),
                     _ => {
                         let hours = secs / 3600;
                         let minutes = (secs % 3600) / 60;
-                        format!(
-                            "Need {} hours {} minutes to sync to the latest Header.",
-                            hours, minutes
-                        )
+                        format!("ETA: {} hours {} minutes.", hours, minutes)
                     }
                 }
             }
@@ -608,7 +603,7 @@ impl Synchronizer {
                     // that for the first time, OR this peer was able to catch up to some earlier point
                     // where we checked against our tip.
                     // Either way, set a new timeout based on current tip.
-                    state.chain_sync.timeout = now + CHAIN_SYNC_TIMEOUT;
+                    state.chain_sync.timeout = now.saturating_add(CHAIN_SYNC_TIMEOUT);
                     state.chain_sync.work_header = Some(tip_header);
                     state.chain_sync.total_difficulty = Some(local_total_difficulty);
                     state.chain_sync.sent_getheaders = false;
@@ -626,7 +621,8 @@ impl Synchronizer {
                         }
                     } else {
                         state.chain_sync.sent_getheaders = true;
-                        state.chain_sync.timeout = now + EVICTION_HEADERS_RESPONSE_TIME;
+                        state.chain_sync.timeout =
+                            now.saturating_add(EVICTION_HEADERS_RESPONSE_TIME);
                         active_chain.send_getheaders_to_peer(
                             nc,
                             *peer,
@@ -1010,10 +1006,10 @@ impl CKBProtocolHandler for Synchronizer {
                         }
                     }
                 }
-                NOT_IBD_BLOCK_FETCH_TOKEN => {
-                    if !self.shared.active_chain().is_initial_block_download() {
-                        self.find_blocks_to_fetch(&nc, IBDState::Out);
-                    }
+                NOT_IBD_BLOCK_FETCH_TOKEN
+                    if !self.shared.active_chain().is_initial_block_download() =>
+                {
+                    self.find_blocks_to_fetch(&nc, IBDState::Out);
                 }
                 TIMEOUT_EVICTION_TOKEN => {
                     self.eviction(&nc);

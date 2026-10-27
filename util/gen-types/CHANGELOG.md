@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2](https://github.com/nervosnetwork/ckb/compare/ckb-gen-types-v1.1.1...ckb-gen-types-v1.1.2) - 2026-09-28
+
+### Changed
+
+- *(deps)* bump the all-dependencies group across 1 directory with 1 update (by @eval-exec)
+
+### Contributors
+
+- @eval-exec
+
+## [1.1.1](https://github.com/nervosnetwork/ckb/compare/ckb-gen-types-v1.1.0...ckb-gen-types-v1.1.1) - 2026-06-08
+
+### Changed
+
+- Merge commit from fork (by @zhangsoledad)
+- Merge commit from fork (by @eval-exec)
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Fixed
+
+- Fix clippy (#5227) (by @chenyukang)
+
+### Contributors
+
+- @chenyukang
+- @zhangsoledad
+- @eval-exec
+
 ## [1.1.0](https://github.com/nervosnetwork/ckb/compare/ckb-gen-types-v1.0.2...ckb-gen-types-v1.1.0) - 2026-03-02
 
 ### Added

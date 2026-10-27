@@ -17,7 +17,11 @@ pub trait EpochProvider {
     /// Get corresponding epoch progress information by block header
     fn get_block_epoch(&self, header: &HeaderView) -> Option<BlockEpoch> {
         self.get_epoch_ext(header).map(|epoch| {
-            if header.number() != epoch.start_number() + epoch.length() - 1 {
+            let tail_number = epoch
+                .start_number()
+                .checked_add(epoch.length())
+                .and_then(|number| number.checked_sub(1));
+            if Some(header.number()) != tail_number {
                 BlockEpoch::NonTailBlock { epoch }
             } else {
                 let last_block_hash_in_previous_epoch = if epoch.is_genesis() {
@@ -33,11 +37,11 @@ pub trait EpochProvider {
                         .get_block_ext(&last_block_hash_in_previous_epoch)
                         .expect("stored block ext")
                         .total_uncles_count;
-                let epoch_duration_in_milliseconds = header.timestamp()
-                    - self
-                        .get_block_header(&last_block_hash_in_previous_epoch)
+                let epoch_duration_in_milliseconds = header.timestamp().saturating_sub(
+                    self.get_block_header(&last_block_hash_in_previous_epoch)
                         .expect("stored block header")
-                        .timestamp();
+                        .timestamp(),
+                );
 
                 BlockEpoch::TailBlock {
                     epoch,

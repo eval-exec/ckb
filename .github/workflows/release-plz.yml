@@ -8,8 +8,8 @@ on:
 jobs:
   release-plz-release:
     name: Release-plz release
-    runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'nervosnetwork' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    if: ${{ github.repository == 'nervosnetwork/ckb' }}
     permissions:
       contents: write
       id-token: write
@@ -33,11 +33,11 @@ jobs:
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.85.0
+          toolchain: 1.95.0
           components: rustfmt
       - &generate-token
         name: Generate GitHub token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
@@ -52,7 +52,7 @@ jobs:
   release-plz-pr:
     name: Release-plz PR
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'nervosnetwork' }}
+    if: ${{ github.repository == 'nervosnetwork/ckb' }}
     permissions:
       pull-requests: write
       contents: write

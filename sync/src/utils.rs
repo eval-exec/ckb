@@ -225,7 +225,6 @@ fn protocol_name(protocol_id: ProtocolId) -> String {
         100 => SupportProtocols::Sync.name(),
         101 => SupportProtocols::RelayV3.name(),
         102 => SupportProtocols::Time.name(),
-        110 => SupportProtocols::Alert.name(),
         120 => SupportProtocols::LightClient.name(),
         121 => SupportProtocols::Filter.name(),
         _ => {
@@ -244,7 +243,7 @@ pub(crate) async fn send_block_proposals(
         .transactions(txs)
         .build();
     let message = packed::RelayMessage::new_builder().set(content).build();
-    let status = async_quick_send_message_to(nc, peer_index, &message).await;
+    let status = async_send_message_to(nc, peer_index, &message).await;
     if !status.is_ok() {
         ckb_logger::error!(
             "send RelayBlockProposal to {}, status: {:?}",

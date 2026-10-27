@@ -8,7 +8,7 @@ edition = "2024"
 description = "CKB integration tests"
 homepage = "https://github.com/nervosnetwork/ckb"
 repository = "https://github.com/nervosnetwork/ckb"
-rust-version = "1.92.0"
+rust-version = "1.95.0"
 
 [[bin]]
 name = "ckb-test"
@@ -41,7 +41,6 @@ ckb-shared.workspace = true
 tempfile.workspace = true
 reqwest.workspace = true
 rand.workspace = true
-ckb-systemtime.workspace = true
 serde_json.workspace = true
 byteorder.workspace = true
 jsonrpc-core.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "ckb"
-version = "0.206.0"
+version = "0.210.0"
 license = "MIT"
 authors = ["Nervos Core Dev <dev@nervos.org>"]
 edition = "2024"
@@ -8,7 +8,7 @@ build = "build.rs"
 description = "CKB is the layer 1 of Nervos Network, a public/permissionless blockchain"
 homepage = "https://github.com/nervosnetwork/ckb"
 repository = "https://github.com/nervosnetwork/ckb"
-rust-version = "1.92.0"
+rust-version = "1.95.0"
 default-run = "ckb"
 
 [package.metadata.binstall]
@@ -88,7 +88,6 @@ members = [
   "notify",
   "util/memory-tracker",
   "db-migration",
-  "util/network-alert",
   "store",
   "util/indexer-sync",
   "util/indexer",
@@ -179,9 +178,7 @@ ckb-metrics-service = { path = "util/metrics-service", version = "1" }
 ckb-migrate = { path = "util/migrate", version = "1" }
 ckb-migration-template = { path = "util/migrate/migration-template", version = "1" }
 ckb-miner = { path = "miner", version = "1" }
-ckb-multisig = { path = "util/multisig", version = "1" }
 ckb-network = { path = "network", version = "1" }
-ckb-network-alert = { path = "util/network-alert", version = "1" }
 ckb-notify = { path = "notify", version = "1" }
 ckb-occupied-capacity = { path = "util/occupied-capacity", version = "1" }
 ckb-occupied-capacity-core = { path = "util/occupied-capacity/core", version = "1" }
@@ -212,7 +209,7 @@ ckb-util = { path = "util", version = "1" }
 ckb-verification = { path = "verification", version = "1" }
 ckb-verification-contextual = { path = "verification/contextual", version = "1" }
 ckb-verification-traits = { path = "verification/traits", version = "1" }
-ckb-vm = { version = "=0.24.14", default-features = false }
+ckb-vm = { version = "=0.24.15", default-features = false }
 clap = "=4.4"
 console = ">=0.9.1, <1.0.0"
 console-subscriber = "0.4.0"
@@ -220,13 +217,15 @@ criterion = "0.5"
 crossbeam = "0.8.2"
 crossbeam-channel = "0.5.1"
 ctrlc = "3.1"
+data-encoding = "2.6"
 daggy = "0.8.0"
 dashmap = "6.0"
 derive_more = { version = "1", default-features = false }
 eaglesong = "0.1"
+ed25519-dalek = "2.1"
 env_logger = "0.10"
 fail = "0.4"
-faster-hex = "0.6"
+faster-hex = { version = "1.0", default-features = false, features = ["std"] }
 faux = "0.1"
 fdlimit = "0.2.1"
 fs2 = "0.4.3"
@@ -240,6 +239,7 @@ governor = { version = "0.10", default-features = false, features = [
 ] }
 hex = "0.4"
 hickory-resolver = "0.24.2"
+hmac = "0.12"
 http-body-util = "0.1"
 hyper = "1"
 hyper-tls = "0.6"
@@ -263,10 +263,10 @@ merkle-cbt = "0.3"
 minstant = "0.1.4"
 molecule = { version = "0.9.0", default-features = false }
 multi_index_map = "0.15.0"
-multiaddr = { version = "0.3.6", package = "tentacle-multiaddr" }
+multiaddr = { version = "0.3.7", package = "tentacle-multiaddr" }
 num_cpus = "1.16.0"
 numext-fixed-uint = "0.1"
-p2p = { version = "0.7.1", package = "tentacle", default-features = false }
+p2p = { version = "0.7.6", package = "tentacle", default-features = false }
 parking_lot = "0.12"
 paste = "1.0"
 path-clean = "0.1.0"
@@ -284,10 +284,10 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 rhai = "1.16.0"
 rocksdb = { version = "=0.21.1", package = "ckb-rocksdb", default-features = false }
 rustc-hash = "1.1"
-secio = { version = "0.6.6", package = "tentacle-secio" }
+secio = { version = "0.6.8", package = "tentacle-secio" }
 secp256k1 = "0.30"
-semver = "1.0"
 sentry = "0.34.0"
+sha2 = "0.10"
 serde = "1.0"
 serde_json = "1.0"
 serde_plain = "0.3.0"
@@ -296,6 +296,7 @@ sled = "0.34.7"
 snap = "1"
 sql-builder = "3.1"
 sqlx = "0.8.2"
+subtle = "2.6"
 syn = "2.0"
 tera = "1"
 thiserror = "1.0.22"
@@ -304,7 +305,6 @@ tiny-keccak = "2.0"
 tokio = "1.35.0"
 tokio-util = "0.7.8"
 toml = "0.5"
-torut = "0.2.1"
 tower-http = "0.6"
 ubyte = "0.10"
 url = "2.2.2"

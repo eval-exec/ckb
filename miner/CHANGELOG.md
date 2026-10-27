@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0](https://github.com/nervosnetwork/ckb/compare/ckb-miner-v1.1.1...ckb-miner-v1.2.0) - 2026-07-28
+
+### Added
+
+- add bearer token authentication for miner notify mode (#5257) (by @zhangsoledad)
+
+### Contributors
+
+- @zhangsoledad
+
+## [1.1.1](https://github.com/nervosnetwork/ckb/compare/ckb-miner-v1.1.0...ckb-miner-v1.1.1) - 2026-06-08
+
+### Changed
+
+- [rust-toolchain] Upgrade Rust toolchain to 1.95.0 (#5175) (by @eval-exec)
+
+### Contributors
+
+- @eval-exec
+
 ## [1.1.0](https://github.com/nervosnetwork/ckb/compare/ckb-miner-v1.0.2...ckb-miner-v1.1.0) - 2026-03-02
 
 ### Added
