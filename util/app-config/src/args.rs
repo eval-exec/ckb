@@ -98,9 +98,12 @@ pub struct ReplayArgs {
     /// Loaded consensus.
     pub consensus: Consensus,
     /// The directory to store the temporary files during the replay.
-    pub tmp_target: PathBuf,
+    pub tmp_target: Option<PathBuf>,
     /// Enable profile on blocks in the range `[from, to]`.
     pub profile: ProfileArgs,
+    /// Verify the blocks in the range `[from, to]` against the existing chain
+    /// DB, without replaying the prefix or attaching the blocks.
+    pub verify_only: bool,
     /// Enable sanity check.
     pub sanity_check: bool,
     /// Enable full verification.

@@ -167,14 +167,9 @@ H256::from_str(&target[2..]).expect("default assume_valid_target for testnet mus
     pub fn replay(self, matches: &ArgMatches) -> Result<ReplayArgs, ExitCode> {
         let consensus = self.consensus()?;
         let config = self.config.into_ckb()?;
-        let tmp_target = matches
-            .get_one::<PathBuf>(cli::ARG_TMP_TARGET)
-            .ok_or_else(|| {
-                eprintln!("Args Error: {:?} no found", cli::ARG_TMP_TARGET);
-                ExitCode::Cli
-            })?
-            .clone();
-        let profile = if matches.get_flag(cli::ARG_PROFILE) {
+        let tmp_target = matches.get_one::<PathBuf>(cli::ARG_TMP_TARGET).cloned();
+        let verify_only = matches.get_flag(cli::ARG_VERIFY_ONLY);
+        let profile = if matches.get_flag(cli::ARG_PROFILE) || verify_only {
             let from = matches.get_one::<u64>(cli::ARG_FROM).cloned();
             let to = matches.get_one::<u64>(cli::ARG_TO).cloned();
             Some((from, to))
@@ -188,6 +183,7 @@ H256::from_str(&target[2..]).expect("default assume_valid_target for testnet mus
             consensus,
             tmp_target,
             profile,
+            verify_only,
             sanity_check,
             full_verification,
         })

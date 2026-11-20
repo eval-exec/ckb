@@ -35,6 +35,8 @@ ckb-instrument = { workspace = true, features = ["progress_bar"] }
 ckb-build-info.workspace = true
 ckb-memory-tracker.workspace = true
 ckb-chain-iter.workspace = true
+ckb-verification.workspace = true
+ckb-verification-contextual.workspace = true
 ckb-verification-traits.workspace = true
 ckb-async-runtime.workspace = true
 ckb-migrate.workspace = true

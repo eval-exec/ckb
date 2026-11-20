@@ -105,6 +105,8 @@ pub const ARG_TMP_TARGET: &str = "tmp-target";
 pub const ARG_SECRET_PATH: &str = "secret-path";
 /// Command line argument `--profile`.
 pub const ARG_PROFILE: &str = "profile";
+/// Command line argument `--verify-only`.
+pub const ARG_VERIFY_ONLY: &str = "verify-only";
 /// Command line argument `--sanity-check`.
 pub const ARG_SANITY_CHECK: &str = "sanity-check";
 /// Command line argument `--full-verification`.
@@ -350,9 +352,10 @@ fn replay() -> Command {
         .override_help("
             --tmp-target <tmp> --profile 1 10,\n
             --tmp-target <tmp> --sanity-check,\n
+            --verify-only 1 10,\n
         ")
-        .arg(Arg::new(ARG_TMP_TARGET).long(ARG_TMP_TARGET).value_parser(clap::builder::PathBufValueParser::new()).action(clap::ArgAction::Set).required(true).help(
-            "Specify a target path. The profile command makes a temporary directory within the specified target path. This temporary directory will be automatically deleted when the command completes.",
+        .arg(Arg::new(ARG_TMP_TARGET).long(ARG_TMP_TARGET).value_parser(clap::builder::PathBufValueParser::new()).action(clap::ArgAction::Set).required(false).help(
+            "Specify a target path. The profile command makes a temporary directory within the specified target path. This temporary directory will be automatically deleted when the command completes. Required unless --verify-only is used.",
         ))
         .arg(Arg::new(ARG_PROFILE).long(ARG_PROFILE).action(clap::ArgAction::SetTrue).help(
             "Enable profile",
@@ -368,6 +371,11 @@ fn replay() -> Command {
                 .help("Specify profile to block number"),
         )
         .arg(
+            Arg::new(ARG_VERIFY_ONLY).long(ARG_VERIFY_ONLY).action(clap::ArgAction::SetTrue).help(
+                "Contextually verify the block range against the existing chain DB without replaying the prefix or attaching blocks. Thread count is controlled by CKB_CONTEXTUAL_VERIFY_THREADS.",
+            )
+        )
+        .arg(
             Arg::new(ARG_SANITY_CHECK).long(ARG_SANITY_CHECK).action(clap::ArgAction::SetTrue).help("Enable sanity check")
         )
         .arg(
@@ -375,7 +383,7 @@ fn replay() -> Command {
         )
         .group(
             ArgGroup::new("mode")
-                .args([ARG_PROFILE, ARG_SANITY_CHECK])
+                .args([ARG_PROFILE, ARG_VERIFY_ONLY, ARG_SANITY_CHECK])
                 .required(true)
         )
 }
