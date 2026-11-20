@@ -16,7 +16,7 @@ pub use app_config::{
 };
 pub use args::{
     CustomizeSpec, DaemonArgs, ExportArgs, ExportTarget, ImportArgs, ImportSource, InitArgs,
-    MigrateArgs, MinerArgs, PeerIDArgs, ReplayArgs, ResetDataArgs, RunArgs, StatsArgs,
+    MigrateArgs, MinerArgs, PeerIDArgs, ProfileArgs, ReplayArgs, ResetDataArgs, RunArgs, StatsArgs,
 };
 
 pub use configs::*;

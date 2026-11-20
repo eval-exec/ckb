@@ -6,5 +6,5 @@ mod contextual_block_verifier;
 mod tests;
 mod uncles_verifier;
 
-pub use crate::contextual_block_verifier::{ContextualBlockVerifier, VerifyContext};
+pub use crate::contextual_block_verifier::{ContextualBlockVerifier, VerifyContext, VerifyTimings};
 const LOG_TARGET: &str = "ckb_chain";

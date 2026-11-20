@@ -35,6 +35,7 @@ use ckb_verification_traits::Switch;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, oneshot};
 
 /// Context for context-dependent block verification
@@ -426,7 +427,7 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer + 'static> BlockTxsVerifier<'a,
         &self,
         resolved: &'a [Arc<ResolvedTransaction>],
         skip_script_verify: bool,
-    ) -> Result<(Cycle, Vec<Completed>), Error> {
+    ) -> Result<(Cycle, Vec<Completed>, Duration), Error> {
         // Skip the cache entirely when scripts are not verified, and omit the
         // cellbase transaction because its entry would never be reused.
         let fetched_cache = if !skip_script_verify && resolved.len() > 1 {
@@ -481,7 +482,9 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer + 'static> BlockTxsVerifier<'a,
                 .skip(1) // skip cellbase tx
                 .collect::<Result<Vec<(VerifyCacheKey, Completed)>, Error>>()
         };
+        let txs_start = Instant::now();
         let ret = verify_thread_pool().install(verify)?;
+        let txs_elapsed = txs_start.elapsed();
 
         let sum: Cycle = ret.iter().map(|(_, cache_entry)| cache_entry.cycles).sum();
         let cache_entires = ret
@@ -502,7 +505,7 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer + 'static> BlockTxsVerifier<'a,
         if sum > self.context.consensus.max_block_cycles() {
             Err(BlockErrorKind::ExceededMaximumCycles.into())
         } else {
-            Ok((sum, cache_entires))
+            Ok((sum, cache_entires, txs_elapsed))
         }
     }
 }
@@ -623,6 +626,16 @@ impl<'a, 'b, CS: ChainStore + VersionbitsIndexer, MS: MMRStore<HeaderDigest>>
     }
 }
 
+/// Wall-clock timings of the phases of contextual block verification.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VerifyTimings {
+    /// Block-level checks that run before transaction verification: parent
+    /// lookup, epoch computation and the sequential block-level verifiers.
+    pub block_level: Duration,
+    /// Per-transaction verification, including the parallel script execution.
+    pub txs: Duration,
+}
+
 /// Context-dependent verification checks for block
 ///
 /// Contains:
@@ -666,6 +679,19 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
         resolved: &'a [Arc<ResolvedTransaction>],
         block: &'a BlockView,
     ) -> Result<(Cycle, Vec<Completed>), Error> {
+        self.verify_with_timing(resolved, block)
+            .map(|(cycles, completed, _timings)| (cycles, completed))
+    }
+
+    /// Perform context-dependent verification checks for block, also returning
+    /// wall-clock timings of the block-level checks and the per-transaction
+    /// verification phase.
+    pub fn verify_with_timing(
+        &'a self,
+        resolved: &'a [Arc<ResolvedTransaction>],
+        block: &'a BlockView,
+    ) -> Result<(Cycle, Vec<Completed>, VerifyTimings), Error> {
+        let block_level_start = Instant::now();
         let parent_hash = block.data().header().raw().parent_hash();
         let header = block.header();
         let parent = self
@@ -714,7 +740,8 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
                 .verify(block)?;
         }
 
-        let ret = BlockTxsVerifier::new(
+        let block_level = block_level_start.elapsed();
+        let (cycles, completed, txs) = BlockTxsVerifier::new(
             self.context.clone(),
             header,
             self.handle,
@@ -722,6 +749,6 @@ impl<'a, CS: ChainStore + VersionbitsIndexer + 'static, MS: MMRStore<HeaderDiges
             &parent,
         )
         .verify(resolved, self.switch.disable_script())?;
-        Ok(ret)
+        Ok((cycles, completed, VerifyTimings { block_level, txs }))
     }
 }
