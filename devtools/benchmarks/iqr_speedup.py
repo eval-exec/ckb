@@ -53,7 +53,10 @@ def compute_row(baseline, sample, min_txs):
     blocks = [
         block
         for block in baseline
-        if block in sample and baseline[block][0] >= min_txs
+        if block in sample
+        and baseline[block][0] >= min_txs
+        and baseline[block][1] > 0
+        and sample[block][1] > 0
     ]
     if not blocks:
         return None
@@ -142,15 +145,15 @@ def main():
         return
 
     print(
-        "| threads | blocks | Aggregate speedup | Median (p50) | p25 | p75 | p95 "
-        "| IQR (p75-p25) | Mean |"
+        "| threads | Aggregate speedup | Median (p50) | p25 | p75 | p95 "
+        "| IQR (p75−p25) | Mean |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|")
     for threads_count, row in rows:
         print(
-            f"| {threads_count} | {row['blocks']} | {row['aggregate']:.2f}x "
-            f"| {row['median']:.2f}x | {row['p25']:.2f}x | {row['p75']:.2f}x "
-            f"| {row['p95']:.2f}x | {row['iqr']:.2f} | {row['mean']:.2f}x |"
+            f"| {threads_count} | {row['aggregate']:.2f}× "
+            f"| {row['median']:.2f}× | {row['p25']:.2f}× | {row['p75']:.2f}× "
+            f"| {row['p95']:.2f}× | {row['iqr']:.2f} | {row['mean']:.2f}× |"
         )
 
 
